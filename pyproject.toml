@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "newspaper-ocr"
+version = "0.1.0"
+description = "Modular OCR pipeline for historical newspaper scans"
+requires-python = ">=3.11"
+dependencies = [
+    "pillow>=10.0",
+    "opencv-python-headless>=4.8",
+    "onnxruntime>=1.16",
+    "numpy>=1.24",
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "click>=8.0",
+    "huggingface-hub>=0.20",
+]
+
+[project.optional-dependencies]
+tesseract = []
+effocr = ["efficient-ocr @ git+https://github.com/nealcaren/efficient_ocr.git"]
+paddlex = ["paddlex", "paddlepaddle"]
+all = ["newspaper-ocr[tesseract,effocr,paddlex]"]
+dev = ["pytest>=7.0", "pytest-cov"]
+
+[project.scripts]
+newspaper-ocr = "newspaper_ocr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
