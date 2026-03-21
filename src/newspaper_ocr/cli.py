@@ -21,9 +21,11 @@ import click
               help="Recognition mode: line or region (default: region)")
 @click.option("--no-layout-processing", is_flag=True,
               help="Disable reading order post-processing")
+@click.option("--no-text-cleaning", is_flag=True,
+              help="Disable dehyphenation and line-joining post-processing")
 @click.option("--outdir", default=None,
               help="Output directory (default: stdout)")
-def main(images, backend, detector, output, model, model_dir, mode, no_layout_processing, outdir):
+def main(images, backend, detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, outdir):
     """OCR historical newspaper scans.
 
     Examples:
@@ -55,6 +57,7 @@ def main(images, backend, detector, output, model, model_dir, mode, no_layout_pr
         output=output,
         model_cache_dir=model_dir,
         layout_processing=not no_layout_processing,
+        text_cleaning=not no_text_cleaning,
     )
 
     for image_path in images:

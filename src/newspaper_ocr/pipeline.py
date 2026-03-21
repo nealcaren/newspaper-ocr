@@ -16,6 +16,7 @@ class Pipeline:
         recognizer_model: str | Path | None = None,
         model_cache_dir: str | Path | None = None,
         layout_processing: bool = True,
+        text_cleaning: bool = True,
         device: str = "cpu",
     ):
         from newspaper_ocr.detectors import DETECTORS
@@ -56,6 +57,10 @@ class Pipeline:
         # Layout post-processing
         self.layout_processor = LayoutProcessor(enabled=layout_processing)
 
+        # Text cleaning (dehyphenation + line joining)
+        from newspaper_ocr.text_cleaner import TextCleaner
+        self.text_cleaner = TextCleaner(enabled=text_cleaning)
+
     def run(self, image: Image.Image) -> str:
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
@@ -75,6 +80,7 @@ class Pipeline:
             for region in layout.regions:
                 region = self.recognizer.recognize(region)
 
+        layout = self.text_cleaner.clean(layout)
         return self.formatter.format(layout)
 
     def ocr(self, path: str | Path, output: str | None = None) -> str:
