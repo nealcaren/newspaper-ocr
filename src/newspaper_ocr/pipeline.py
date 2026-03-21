@@ -17,6 +17,7 @@ class Pipeline:
         model_cache_dir: str | Path | None = None,
         layout_processing: bool = True,
         text_cleaning: bool = True,
+        spell_check: bool = False,
         device: str = "cpu",
     ):
         from newspaper_ocr.detectors import DETECTORS
@@ -61,6 +62,10 @@ class Pipeline:
         from newspaper_ocr.text_cleaner import TextCleaner
         self.text_cleaner = TextCleaner(enabled=text_cleaning)
 
+        # Optional spell correction (off by default — it's aggressive)
+        from newspaper_ocr.spell_checker import SpellChecker
+        self.spell_checker = SpellChecker(enabled=spell_check)
+
     def run(self, image: Image.Image) -> str:
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
@@ -81,6 +86,7 @@ class Pipeline:
                 region = self.recognizer.recognize(region)
 
         layout = self.text_cleaner.clean(layout)
+        layout = self.spell_checker.check(layout)
         return self.formatter.format(layout)
 
     def ocr(self, path: str | Path, output: str | None = None) -> str:
