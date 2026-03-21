@@ -21,8 +21,9 @@ dependencies = [
 [project.optional-dependencies]
 tesseract = []
 effocr = ["efficient-ocr @ git+https://github.com/nealcaren/efficient_ocr.git"]
-paddlex = ["paddlex", "paddlepaddle"]
-all = ["newspaper-ocr[tesseract,effocr,paddlex]"]
+paddlex = ["paddlepaddle", "paddlex"]
+glm-ocr = ["transformers>=5.1", "torch"]
+all = ["newspaper-ocr[tesseract,effocr,paddlex,glm-ocr]"]
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.scripts]

@@ -20,3 +20,9 @@ try:
     RECOGNIZERS.register("effocr", EffocrRecognizer)
 except ImportError:
     pass
+
+try:
+    from newspaper_ocr.recognizers.glm_ocr import GlmOcrRecognizer
+    RECOGNIZERS.register("glm-ocr", GlmOcrRecognizer)
+except ImportError:
+    pass

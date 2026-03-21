@@ -82,8 +82,8 @@ class Pipeline:
                 region.lines = self.recognizer.recognize_batch(region.lines)
                 region.text = " ".join(line.text for line in region.lines if line.text)
         elif isinstance(self.recognizer, RegionRecognizer):
-            for region in layout.regions:
-                region = self.recognizer.recognize(region)
+            for i, region in enumerate(layout.regions):
+                layout.regions[i] = self.recognizer.recognize(region)
 
         layout = self.text_cleaner.clean(layout)
         layout = self.spell_checker.check(layout)
