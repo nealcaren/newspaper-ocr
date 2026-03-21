@@ -60,7 +60,14 @@ class Pipeline:
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
 
-        if isinstance(self.recognizer, LineRecognizer):
+        # Region-level recognition: recognizer has recognize_region and mode == "region"
+        if (
+            hasattr(self.recognizer, "recognize_region")
+            and getattr(self.recognizer, "mode", "line") == "region"
+        ):
+            for region in layout.regions:
+                self.recognizer.recognize_region(region)
+        elif isinstance(self.recognizer, LineRecognizer):
             for region in layout.regions:
                 region.lines = self.recognizer.recognize_batch(region.lines)
                 region.text = " ".join(line.text for line in region.lines if line.text)

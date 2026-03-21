@@ -10,6 +10,12 @@ except ImportError:
     pass
 
 try:
+    from newspaper_ocr.recognizers.tesserocr_backend import TesserocrRecognizer
+    RECOGNIZERS.register("tesserocr", TesserocrRecognizer)
+except ImportError:
+    pass
+
+try:
     from newspaper_ocr.recognizers.effocr import EffocrRecognizer
     RECOGNIZERS.register("effocr", EffocrRecognizer)
 except ImportError:
