@@ -10,20 +10,55 @@ from newspaper_ocr.formatters.base import Formatter
 class Pipeline:
     def __init__(
         self,
-        detector: Detector | None = None,
-        recognizer: LineRecognizer | RegionRecognizer | None = None,
-        formatter: Formatter | None = None,
+        detector: Detector | str = "as_yolo",
+        recognizer: LineRecognizer | RegionRecognizer | str = "tesseract",
+        output: Formatter | str = "text",
+        recognizer_model: str | Path | None = None,
+        model_cache_dir: str | Path | None = None,
+        layout_processing: bool = True,
+        device: str = "cpu",
     ):
-        self.detector = detector
-        self.recognizer = recognizer
-        self.formatter = formatter
+        from newspaper_ocr.detectors import DETECTORS
+        from newspaper_ocr.recognizers import RECOGNIZERS
+        from newspaper_ocr.formatters import FORMATTERS
+        from newspaper_ocr.layout_processor import LayoutProcessor
+
+        # Resolve detector
+        if isinstance(detector, str):
+            det_cls = DETECTORS.get(detector)
+            self.detector = det_cls(model_dir=model_cache_dir)
+        else:
+            self.detector = detector
+
+        # Resolve recognizer
+        if isinstance(recognizer, str):
+            rec_cls = RECOGNIZERS.get(recognizer)
+            rec_kwargs = {}
+            if recognizer_model:
+                # TesseractRecognizer uses "model", EffocrRecognizer uses "model_dir"
+                import inspect
+                params = inspect.signature(rec_cls.__init__).parameters
+                if "model" in params:
+                    rec_kwargs["model"] = str(recognizer_model)
+                elif "model_dir" in params:
+                    rec_kwargs["model_dir"] = str(recognizer_model)
+            self.recognizer = rec_cls(**rec_kwargs)
+        else:
+            self.recognizer = recognizer
+
+        # Resolve formatter
+        if isinstance(output, str):
+            fmt_cls = FORMATTERS.get(output)
+            self.formatter = fmt_cls()
+        else:
+            self.formatter = output
+
+        # Layout post-processing
+        self.layout_processor = LayoutProcessor(enabled=layout_processing)
 
     def run(self, image: Image.Image) -> str:
-        """Run the full pipeline on a PIL Image."""
         layout = self.detector.detect(image)
-
-        if hasattr(self, 'layout_processor'):
-            layout = self.layout_processor.process(layout)
+        layout = self.layout_processor.process(layout)
 
         if isinstance(self.recognizer, LineRecognizer):
             for region in layout.regions:
@@ -36,10 +71,8 @@ class Pipeline:
         return self.formatter.format(layout)
 
     def ocr(self, path: str | Path, output: str | None = None) -> str:
-        """Run OCR on an image file."""
         image = Image.open(str(path)).convert("RGB")
         return self.run(image)
 
     def ocr_batch(self, paths: list[str | Path]) -> list[str]:
-        """Run OCR on multiple image files."""
         return [self.ocr(p) for p in paths]

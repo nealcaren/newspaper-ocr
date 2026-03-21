@@ -32,7 +32,8 @@ def test_pipeline_end_to_end():
     pipe = Pipeline(
         detector=MockDetector(),
         recognizer=MockRecognizer(),
-        formatter=MockFormatter(),
+        output=MockFormatter(),
+        layout_processing=False,
     )
     img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
     result = pipe.run(img)
@@ -46,7 +47,8 @@ def test_pipeline_ocr_from_path(tmp_path):
     pipe = Pipeline(
         detector=MockDetector(),
         recognizer=MockRecognizer(),
-        formatter=MockFormatter(),
+        output=MockFormatter(),
+        layout_processing=False,
     )
     result = pipe.ocr(str(img_path))
     assert "mock text" in result
@@ -62,7 +64,8 @@ def test_pipeline_batch(tmp_path):
     pipe = Pipeline(
         detector=MockDetector(),
         recognizer=MockRecognizer(),
-        formatter=MockFormatter(),
+        output=MockFormatter(),
+        layout_processing=False,
     )
     results = pipe.ocr_batch(paths)
     assert len(results) == 3
