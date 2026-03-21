@@ -1,0 +1,24 @@
+Metadata-Version: 2.4
+Name: newspaper-ocr
+Version: 0.1.0
+Summary: Modular OCR pipeline for historical newspaper scans
+Requires-Python: >=3.11
+Requires-Dist: pillow>=10.0
+Requires-Dist: opencv-python-headless>=4.8
+Requires-Dist: onnxruntime>=1.16
+Requires-Dist: numpy>=1.24
+Requires-Dist: torch>=2.0
+Requires-Dist: torchvision>=0.15
+Requires-Dist: click>=8.0
+Requires-Dist: huggingface-hub>=0.20
+Provides-Extra: tesseract
+Provides-Extra: effocr
+Requires-Dist: efficient-ocr @ git+https://github.com/nealcaren/efficient_ocr.git ; extra == "effocr"
+Provides-Extra: paddlex
+Requires-Dist: paddlex; extra == "paddlex"
+Requires-Dist: paddlepaddle; extra == "paddlex"
+Provides-Extra: all
+Requires-Dist: newspaper-ocr[effocr,paddlex,tesseract]; extra == "all"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"

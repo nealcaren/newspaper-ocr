@@ -1,0 +1,2 @@
+[console_scripts]
+newspaper-ocr = newspaper_ocr.cli:main

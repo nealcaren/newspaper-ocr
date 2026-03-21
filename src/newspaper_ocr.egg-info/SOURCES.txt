@@ -1,0 +1,12 @@
+pyproject.toml
+src/newspaper_ocr/__init__.py
+src/newspaper_ocr/models.py
+src/newspaper_ocr/registry.py
+src/newspaper_ocr.egg-info/PKG-INFO
+src/newspaper_ocr.egg-info/SOURCES.txt
+src/newspaper_ocr.egg-info/dependency_links.txt
+src/newspaper_ocr.egg-info/entry_points.txt
+src/newspaper_ocr.egg-info/requires.txt
+src/newspaper_ocr.egg-info/top_level.txt
+tests/test_models.py
+tests/test_registry.py
