@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from PIL import Image
-from newspaper_ocr.models import PageLayout
+from newspaper_ocr.models import Region, PageLayout
 from newspaper_ocr.detectors.base import Detector
 from newspaper_ocr.recognizers.base import LineRecognizer, RegionRecognizer
 from newspaper_ocr.formatters.base import Formatter
@@ -19,6 +19,8 @@ class Pipeline:
         text_cleaning: bool = True,
         spell_check: bool = False,
         device: str = "cpu",
+        fallback: LineRecognizer | RegionRecognizer | str | None = None,
+        fallback_threshold: float = 70,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -55,6 +57,17 @@ class Pipeline:
         else:
             self.formatter = output
 
+        # Resolve fallback recognizer (optional)
+        if isinstance(fallback, str):
+            fb_cls = RECOGNIZERS.get(fallback)
+            self.fallback = fb_cls()
+        else:
+            self.fallback = fallback
+
+        # Threshold is on Tesseract's 0-100 scale; store as-is, compare against
+        # line.confidence * 100 at runtime.
+        self.fallback_threshold = fallback_threshold
+
         # Layout post-processing
         self.layout_processor = LayoutProcessor(enabled=layout_processing)
 
@@ -65,6 +78,24 @@ class Pipeline:
         # Optional spell correction (off by default — it's aggressive)
         from newspaper_ocr.spell_checker import SpellChecker
         self.spell_checker = SpellChecker(enabled=spell_check)
+
+    def _fallback_recognize_line(self, recognizer, line):
+        """Use any recognizer (line or region) to re-recognize a single line."""
+        if isinstance(recognizer, LineRecognizer):
+            return recognizer.recognize(line)
+        elif isinstance(recognizer, RegionRecognizer):
+            # Wrap the line as a temporary single-line region so RegionRecognizers
+            # (e.g. GlmOcrRecognizer) can handle it without modification.
+            temp_region = Region(
+                bbox=line.bbox,
+                image=line.image,
+                label="text",
+                lines=[line],
+            )
+            result = recognizer.recognize(temp_region)
+            line.text = result.text
+            line.confidence = 1.0  # VLM fallback is trusted
+            return line
 
     def run(self, image: Image.Image) -> str:
         layout = self.detector.detect(image)
@@ -84,6 +115,21 @@ class Pipeline:
         elif isinstance(self.recognizer, RegionRecognizer):
             for i, region in enumerate(layout.regions):
                 layout.regions[i] = self.recognizer.recognize(region)
+
+        # Fallback: re-recognize low-confidence lines with the fallback recognizer.
+        # Only applies when the primary recognizer is a LineRecognizer (so we have
+        # per-line confidence scores) and a fallback has been configured.
+        if self.fallback is not None and isinstance(self.recognizer, LineRecognizer):
+            for region in layout.regions:
+                for i, line in enumerate(region.lines):
+                    if line.confidence * 100 < self.fallback_threshold:
+                        region.lines[i] = self._fallback_recognize_line(
+                            self.fallback, line
+                        )
+                # Rebuild region text after any fallback substitutions
+                region.text = " ".join(
+                    line.text for line in region.lines if line.text
+                )
 
         layout = self.text_cleaner.clean(layout)
         layout = self.spell_checker.check(layout)

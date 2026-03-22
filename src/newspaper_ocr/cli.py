@@ -25,9 +25,13 @@ import click
               help="Disable dehyphenation and line-joining post-processing")
 @click.option("--spell-check", is_flag=True, default=False,
               help="Enable SymSpell spell correction post-processing (off by default)")
+@click.option("--fallback", default=None,
+              help="Fallback recognizer for low-confidence lines (e.g. glm-ocr)")
+@click.option("--fallback-threshold", default=70, type=float,
+              help="Confidence threshold (0-100) below which fallback is used (default: 70)")
 @click.option("--outdir", default=None,
               help="Output directory (default: stdout)")
-def main(images, backend, detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, outdir):
+def main(images, backend, detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, outdir):
     """OCR historical newspaper scans.
 
     Examples:
@@ -61,6 +65,8 @@ def main(images, backend, detector, output, model, model_dir, mode, no_layout_pr
         layout_processing=not no_layout_processing,
         text_cleaning=not no_text_cleaning,
         spell_check=spell_check,
+        fallback=fallback,
+        fallback_threshold=fallback_threshold,
     )
 
     for image_path in images:

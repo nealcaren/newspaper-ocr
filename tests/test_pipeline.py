@@ -1,7 +1,7 @@
 from newspaper_ocr.pipeline import Pipeline
 from newspaper_ocr.models import BBox, Line, Region, PageLayout
 from newspaper_ocr.detectors.base import Detector
-from newspaper_ocr.recognizers.base import LineRecognizer
+from newspaper_ocr.recognizers.base import LineRecognizer, RegionRecognizer
 from newspaper_ocr.formatters.base import Formatter
 from PIL import Image
 import numpy as np
@@ -70,3 +70,139 @@ def test_pipeline_batch(tmp_path):
     results = pipe.ocr_batch(paths)
     assert len(results) == 3
     assert all("mock text" in r for r in results)
+
+
+# ---------------------------------------------------------------------------
+# Fallback recognizer tests
+# ---------------------------------------------------------------------------
+
+class LowConfRecognizer(LineRecognizer):
+    """Primary recognizer that always returns low-confidence results."""
+    def recognize(self, line):
+        line.text = "low conf"
+        line.confidence = 0.3  # 30 on 0-100 scale — below default threshold of 70
+        return line
+
+
+class HighConfRecognizer(LineRecognizer):
+    """Primary recognizer that always returns high-confidence results."""
+    def recognize(self, line):
+        line.text = "high conf"
+        line.confidence = 0.95  # 95 on 0-100 scale — above threshold
+        return line
+
+
+class FallbackLineRecognizer(LineRecognizer):
+    """Fallback recognizer (LineRecognizer variant)."""
+    def __init__(self):
+        self.call_count = 0
+
+    def recognize(self, line):
+        self.call_count += 1
+        line.text = "fallback text"
+        line.confidence = 0.95
+        return line
+
+
+class FallbackRegionRecognizer(RegionRecognizer):
+    """Fallback recognizer (RegionRecognizer variant)."""
+    def __init__(self):
+        self.call_count = 0
+
+    def recognize(self, region):
+        self.call_count += 1
+        region.text = "region fallback"
+        return region
+
+
+def _make_img():
+    return Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+
+
+def test_fallback_triggered_when_confidence_low():
+    """Fallback LineRecognizer is invoked when primary confidence is below threshold."""
+    fallback = FallbackLineRecognizer()
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=LowConfRecognizer(),
+        fallback=fallback,
+        fallback_threshold=70,
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+    )
+    result = pipe.run(_make_img())
+    assert "fallback text" in result
+    assert fallback.call_count == 1
+
+
+def test_fallback_not_triggered_when_confidence_high():
+    """Fallback is NOT invoked when primary confidence exceeds threshold."""
+    fallback = FallbackLineRecognizer()
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=HighConfRecognizer(),
+        fallback=fallback,
+        fallback_threshold=70,
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+    )
+    result = pipe.run(_make_img())
+    assert "high conf" in result
+    assert fallback.call_count == 0
+
+
+def test_fallback_none_does_not_change_behavior():
+    """Pipeline without fallback works exactly as before."""
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=LowConfRecognizer(),
+        fallback=None,
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+    )
+    result = pipe.run(_make_img())
+    assert "low conf" in result
+
+
+def test_fallback_region_recognizer_wraps_line():
+    """A RegionRecognizer used as fallback is wrapped correctly around a line."""
+    fallback = FallbackRegionRecognizer()
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=LowConfRecognizer(),
+        fallback=fallback,
+        fallback_threshold=70,
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+    )
+    result = pipe.run(_make_img())
+    assert "region fallback" in result
+    assert fallback.call_count == 1
+
+
+def test_fallback_threshold_boundary():
+    """Line with confidence exactly at threshold is NOT sent to fallback."""
+    fallback = FallbackLineRecognizer()
+
+    class ExactThresholdRecognizer(LineRecognizer):
+        def recognize(self, line):
+            line.text = "exact"
+            line.confidence = 0.70  # exactly 70 on 0-100 scale
+            return line
+
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=ExactThresholdRecognizer(),
+        fallback=fallback,
+        fallback_threshold=70,
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+    )
+    result = pipe.run(_make_img())
+    assert "exact" in result
+    assert fallback.call_count == 0
