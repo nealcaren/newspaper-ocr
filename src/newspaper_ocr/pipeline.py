@@ -131,7 +131,11 @@ class Pipeline:
                     line.text for line in region.lines if line.text
                 )
 
-        layout = self.text_cleaner.clean(layout)
+        # Text cleaning (dehyphenation, line joining) only for line-level recognizers.
+        # Region-level recognizers (GLM-OCR, VLMs) already return clean text.
+        if isinstance(self.recognizer, LineRecognizer):
+            layout = self.text_cleaner.clean(layout)
+
         layout = self.spell_checker.check(layout)
         return self.formatter.format(layout)
 

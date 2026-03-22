@@ -29,7 +29,10 @@ class TextCleaner:
         if not self.enabled:
             return layout
         for region in layout.regions:
-            if region.lines:
+            # Only reconstruct from lines if lines have text (line-level recognizer).
+            # If region.text is already set (region-level recognizer like GLM-OCR),
+            # don't overwrite it with empty line reconstructions.
+            if region.lines and any(line.text for line in region.lines):
                 region.text = self._reconstruct_region(region.lines)
         return layout
 
