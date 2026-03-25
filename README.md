@@ -27,24 +27,19 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
 
 ## Installation
 
-> **Note:** Not yet published to PyPI. Install from GitHub for now.
-
 ```bash
-# From GitHub (recommended)
-uv pip install git+https://github.com/nealcaren/newspaper-ocr.git
+pip install newspaper-ocr
 
 # Tesseract (requires system install):
 #   macOS: brew install tesseract
 #   Ubuntu: apt install tesseract-ocr
 
-# Fast C API bindings (recommended):
-uv pip install "newspaper-ocr[tesserocr] @ git+https://github.com/nealcaren/newspaper-ocr.git"
+# Optional backends:
+pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
+pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 
-# EfficientOCR backend:
-uv pip install "newspaper-ocr[effocr] @ git+https://github.com/nealcaren/newspaper-ocr.git"
-
-# PP-DocLayout detector:
-uv pip install "newspaper-ocr[paddlex] @ git+https://github.com/nealcaren/newspaper-ocr.git"
+# EfficientOCR (installed separately from fork):
+pip install git+https://github.com/nealcaren/efficient_ocr.git
 ```
 
 ## Quick Start

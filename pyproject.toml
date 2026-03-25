@@ -6,7 +6,22 @@ build-backend = "setuptools.build_meta"
 name = "newspaper-ocr"
 version = "0.1.0"
 description = "Modular OCR pipeline for historical newspaper scans"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+authors = [
+    {name = "Neal Caren", email = "neal.caren@gmail.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Text Processing :: General",
+]
 dependencies = [
     "pillow>=10.0",
     "opencv-python-headless>=4.8",
@@ -18,12 +33,16 @@ dependencies = [
     "huggingface-hub>=0.20",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nealcaren/newspaper-ocr"
+Repository = "https://github.com/nealcaren/newspaper-ocr"
+Issues = "https://github.com/nealcaren/newspaper-ocr/issues"
+
 [project.optional-dependencies]
 tesseract = []
-effocr = ["efficient-ocr @ git+https://github.com/nealcaren/efficient_ocr.git"]
 paddlex = ["paddlepaddle", "paddlex"]
 glm-ocr = ["transformers>=5.1", "torch"]
-all = ["newspaper-ocr[tesseract,effocr,paddlex,glm-ocr]"]
+all = ["newspaper-ocr[tesseract,paddlex,glm-ocr]"]
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.scripts]
