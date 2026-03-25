@@ -44,12 +44,14 @@ def main(images, backend, detector, output, model, model_dir, mode, no_layout_pr
 
     # Build recognizer with mode
     from newspaper_ocr.recognizers import RECOGNIZERS
+    import inspect
     rec_cls = RECOGNIZERS.get(backend)
-    rec_kwargs = {"mode": mode}
+    rec_kwargs = {}
+    params = inspect.signature(rec_cls.__init__).parameters
+    if "mode" in params:
+        rec_kwargs["mode"] = mode
     if model:
         # Route model arg to the right param
-        import inspect
-        params = inspect.signature(rec_cls.__init__).parameters
         if "model" in params:
             rec_kwargs["model"] = model
         elif "model_dir" in params:

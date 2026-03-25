@@ -11,7 +11,7 @@ class TesseractRecognizer(LineRecognizer):
         self,
         model: str = "eng",
         tessdata_dir: str | Path | None = None,
-        mode: str = "line",
+        mode: str = "region",
     ):
         """
         Tesseract OCR recognizer using subprocess calls.

@@ -62,10 +62,10 @@ def test_tesseract_batch(has_tesseract):
 
 # --- Mode parameter tests ---
 
-def test_tesseract_default_mode_is_line():
-    """TesseractRecognizer defaults to line mode."""
+def test_tesseract_default_mode_is_region():
+    """TesseractRecognizer defaults to region mode."""
     rec = TesseractRecognizer()
-    assert rec.mode == "line"
+    assert rec.mode == "region"
 
 
 def test_tesseract_mode_region():

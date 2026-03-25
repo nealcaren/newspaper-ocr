@@ -61,7 +61,7 @@ class TesserocrRecognizer(LineRecognizer):
         self,
         model: str = "eng",
         tessdata_dir: str | Path | None = None,
-        mode: str = "line",
+        mode: str = "region",
     ):
         if tesserocr is None:
             raise ImportError(
