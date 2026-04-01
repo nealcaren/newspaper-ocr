@@ -63,10 +63,8 @@ pipe = Pipeline(recognizer="tesserocr", spell_check=True)
 pipe = Pipeline(output="json")
 result = pipe.ocr("page.jp2")
 
-# Fine-tuned Tesseract model
-from newspaper_ocr.recognizers.tesseract import TesseractRecognizer
-rec = TesseractRecognizer(model="news_gold_v2", tessdata_dir="/path/to/models")
-pipe = Pipeline(recognizer=rec)
+# Bundled fine-tuned model for historical newspapers (recommended)
+pipe = Pipeline(recognizer="tesseract", recognizer_model="news_combo_fast")
 
 # Disable layout post-processing (for non-newspaper documents)
 pipe = Pipeline(layout_processing=False)
@@ -90,8 +88,8 @@ newspaper-ocr page.jp2 --backend tesserocr --spell-check
 # Batch processing to files
 newspaper-ocr *.jp2 --outdir results/ --output text
 
-# Fine-tuned model
-newspaper-ocr page.jp2 --model news_gold_v2.traineddata
+# Fine-tuned model (bundled, recommended)
+newspaper-ocr page.jp2 --model news_combo_fast
 
 # Disable post-processing
 newspaper-ocr page.jp2 --no-layout-processing --no-text-cleaning
@@ -127,17 +125,25 @@ Three recognition backends with different speed/accuracy tradeoffs.
 
 | Backend | Mode | Speed | CER* | How it works |
 |---------|------|-------|------|-------------|
-| `tesseract` | line | ~106s | 3.2% | Subprocess per line, LSTM sequence model |
+| `tesseract` (eng) | line | ~106s | 9.0% | Stock Tesseract, LSTM sequence model |
+| `tesseract` (news_combo_fast) | line | ~93s | 2.9% | **Bundled fine-tuned model** |
 | `tesseract` | region | ~38s | — | Subprocess per region, Tesseract's own line segmentation |
-| `tesserocr` | line | ~26s | 3.2% | C API bindings, no subprocess overhead |
+| `tesserocr` | line | ~26s | — | C API bindings, no subprocess overhead |
 | `tesserocr` | region | ~25s | — | C API, region-level |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 
-*CER measured against LLM gold-standard labels with fine-tuned `news_gold_v2` model. Baseline Tesseract (eng) is ~8-11% CER. Times on a single newspaper page (~1,100 lines).
+*CER measured on pre-1930 newspaper text at R2 (35%) resolution. Times on a single newspaper page (~1,100 lines).
 
-### Fine-Tuned Models
+### Bundled Fine-Tuned Model
 
-The pipeline includes infrastructure for fine-tuning Tesseract on historical newspaper text using LLM-verified gold-standard labels. See `dangerouspress-ocr-finetune` for the training pipeline.
+The package ships with `news_combo_fast` — a quantized Tesseract model (1.4MB) fine-tuned on ~60K lines of pre-1930 historical newspaper text. It achieves **2.9% CER** vs 9.0% for the stock `eng` model, with no speed penalty.
+
+```python
+# Use the fine-tuned model (recommended for historical newspapers)
+pipe = Pipeline(recognizer="tesseract", recognizer_model="news_combo_fast")
+```
+
+See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for the training pipeline.
 
 ## Phase 3: Post-Processing
 
