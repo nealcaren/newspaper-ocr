@@ -110,8 +110,13 @@ class Pipeline:
                 self.recognizer.recognize_region(region)
         elif isinstance(self.recognizer, LineRecognizer):
             for region in layout.regions:
-                region.lines = self.recognizer.recognize_batch(region.lines)
-                region.text = " ".join(line.text for line in region.lines if line.text)
+                if region.lines:
+                    region.lines = self.recognizer.recognize_batch(region.lines)
+                    region.text = " ".join(line.text for line in region.lines if line.text)
+                elif hasattr(self.recognizer, "recognize_region") and region.image is not None:
+                    # Regions without detected lines (ads, tables, etc.) —
+                    # fall back to region-level OCR
+                    self.recognizer.recognize_region(region)
         elif isinstance(self.recognizer, RegionRecognizer):
             for i, region in enumerate(layout.regions):
                 layout.regions[i] = self.recognizer.recognize(region)

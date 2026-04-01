@@ -131,6 +131,7 @@ class LayoutProcessor:
         regions = self._fill_column_gaps(regions, layout.width, layout.height)
         regions = self._reading_order(regions)
         regions = self._merge_adjacent(regions, layout.image)
+        regions = self._drop_empty_overlaps(regions)
         layout.regions = regions
         return layout
 
@@ -248,7 +249,40 @@ class LayoutProcessor:
                         remove.add(i)
                         break
 
+                # Case 4: one region is mostly contained in another -> remove smaller
+                if smaller_area > 0:
+                    frac_i = inter / ai if ai > 0 else 0
+                    frac_j = inter / aj if aj > 0 else 0
+                    if frac_j > 0.5 and aj < ai:
+                        remove.add(j)
+                        continue
+                    if frac_i > 0.5 and ai < aj:
+                        remove.add(i)
+                        break
+
+                # Case 5: overlapping regions with very different sizes —
+                # if one region is much larger and the overlap is significant
+                # for the smaller region, drop the smaller one.
+                larger_area = max(ai, aj)
+                if smaller_area > 0 and larger_area / smaller_area > 3:
+                    frac_small = inter / smaller_area
+                    if frac_small > 0.3:
+                        if ai < aj:
+                            remove.add(i)
+                            break
+                        else:
+                            remove.add(j)
+                            continue
+
         return [r for i, r in enumerate(regions) if i not in remove]
+
+    # ------------------------------------------------------------------
+    # Stage 3b – Drop empty text regions that overlap content regions
+    # ------------------------------------------------------------------
+
+    def _drop_empty_overlaps(self, regions: list[Region]) -> list[Region]:
+        """Remove text-labeled regions with no detected lines — nothing to OCR."""
+        return [r for r in regions if len(r.lines) > 0 or r.label not in _OCR_LABELS]
 
     # ------------------------------------------------------------------
     # Stage 4 – Fill column gaps
@@ -448,7 +482,7 @@ class LayoutProcessor:
                 current = Region(
                     bbox=BBox(x1, y1, x2, y2),
                     image=region.image,
-                    label="text",
+                    label=label,
                     lines=list(region.lines),
                     text=region.text,
                     confidence=region.confidence,
@@ -482,7 +516,7 @@ class LayoutProcessor:
                 current = Region(
                     bbox=BBox(new_x0, new_y0, new_x1, new_y1),
                     image=crop,
-                    label="text",
+                    label=current.label,
                     lines=current.lines + region.lines,
                     text=combined_text,
                     confidence=max(current.confidence, region.confidence),
@@ -492,7 +526,7 @@ class LayoutProcessor:
                 current = Region(
                     bbox=BBox(x1, y1, x2, y2),
                     image=region.image,
-                    label="text",
+                    label=label,
                     lines=list(region.lines),
                     text=region.text,
                     confidence=region.confidence,
