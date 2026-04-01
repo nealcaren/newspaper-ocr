@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "newspaper-ocr"
-version = "0.2.0"
+version = "0.3.0"
 description = "Modular OCR pipeline for historical newspaper scans"
 readme = "README.md"
 license = "MIT"
@@ -42,7 +42,8 @@ Issues = "https://github.com/nealcaren/newspaper-ocr/issues"
 tesseract = []
 paddlex = ["paddlepaddle", "paddlex"]
 glm-ocr = ["transformers>=5.1", "torch"]
-all = ["newspaper-ocr[tesseract,paddlex,glm-ocr]"]
+kraken = ["kraken>=5.0", "huggingface-hub>=0.20"]
+all = ["newspaper-ocr[tesseract,paddlex,glm-ocr,kraken]"]
 dev = ["pytest>=7.0", "pytest-cov"]
 
 [project.scripts]

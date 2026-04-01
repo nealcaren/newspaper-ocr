@@ -27,3 +27,9 @@ try:
     RECOGNIZERS.register("glm-ocr", GlmOcrRecognizer)
 except ImportError:
     pass
+
+try:
+    from newspaper_ocr.recognizers.kraken import KrakenRecognizer
+    RECOGNIZERS.register("kraken", KrakenRecognizer)
+except ImportError:
+    pass

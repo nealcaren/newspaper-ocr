@@ -35,6 +35,7 @@ pip install newspaper-ocr
 #   Ubuntu: apt install tesseract-ocr
 
 # Optional backends:
+pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
 pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 
@@ -130,6 +131,7 @@ Three recognition backends with different speed/accuracy tradeoffs.
 | `tesseract` | region | ~38s | — | Subprocess per region, Tesseract's own line segmentation |
 | `tesserocr` | line | ~26s | — | C API bindings, no subprocess overhead |
 | `tesserocr` | region | ~25s | — | C API, region-level |
+| `kraken` | line | ~10s | 3.5% | Kraken LSTM, ~10x faster than Tesseract |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 
 *CER measured on pre-1930 newspaper text at R2 (35%) resolution. Times on a single newspaper page (~1,100 lines).
@@ -142,6 +144,16 @@ The package ships with `news_combo_fast` — a quantized Tesseract model (1.4MB)
 # Use the fine-tuned model (recommended for historical newspapers)
 pipe = Pipeline(recognizer="tesseract", recognizer_model="news_combo_fast")
 ```
+
+### Kraken Backend
+
+Kraken is ~10x faster than Tesseract per line with comparable accuracy (3.5% CER). The pre-trained model downloads automatically from HuggingFace on first use (~3MB).
+
+```python
+pipe = Pipeline(recognizer="kraken")
+```
+
+Requires: `pip install "newspaper-ocr[kraken]"`
 
 See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for the training pipeline.
 
