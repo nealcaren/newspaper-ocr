@@ -5,18 +5,18 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
 ## Pipeline
 
 ```
-           Phase 1              Phase 2              Phase 3
-           LAYOUT               OCR                  POST-PROCESSING
+           Phase 1               Phase 2              Phase 3
+           LAYOUT                OCR                  POST-PROCESSING
 
-          ┌─────────────────┐   ┌────────────────┐   ┌─────────────────┐
-          │ Detection       │   │ Recognition    │   │ Text Cleaning   │
-Image ──→ │ (AS YOLO or     │──→│ (Tesseract,   │──→│ (dehyphenation, │──→ Output
-JP2/JPG/  │  PP-DocLayout)  │   │  Kraken,      │   │  line joining)  │    text
-PNG       │                 │   │  tesserocr,   │   │                 │    json
-          │ Layout Proc.    │   │  EffOCR)      │   │ Spell Check     │    hOCR
-          │ (reading order, │   │               │   │ (SymSpell)      │
-          │  dedup, merge)  │   │               │   │                 │
-          └─────────────────┘   └────────────────┘   └─────────────────┘
+          ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+          │ Detection        │   │ Recognition      │   │ Text Cleaning    │
+Image ──→ │ (AS YOLO or      │──→│ (Tesseract,      │──→│ (dehyphenation,  │──→ Output
+JP2/JPG/  │  PP-DocLayout)   │   │  Kraken,         │   │  line joining)   │    text
+PNG       │                  │   │  tesserocr,      │   │                  │    json
+          │ Layout Proc.     │   │  EffOCR)         │   │ Spell Check      │    hOCR
+          │ (reading order,  │   │                  │   │ (SymSpell)       │
+          │  dedup, merge)   │   │                  │   │                  │
+          └──────────────────┘   └──────────────────┘   └──────────────────┘
 ```
 
 **Phase 1 — Layout:** Detect regions (articles, headlines, ads) and text lines. Reorder into newspaper reading order (columns left-to-right, top-to-bottom). Deduplicate overlapping detections, fill gaps.
