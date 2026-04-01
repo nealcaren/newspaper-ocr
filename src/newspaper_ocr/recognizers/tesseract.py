@@ -6,6 +6,10 @@ from newspaper_ocr.models import Line, Region
 from newspaper_ocr.recognizers.base import LineRecognizer
 
 
+# Bundled tessdata directory (ships with the package)
+_BUNDLED_TESSDATA = Path(__file__).resolve().parent.parent / "tessdata"
+
+
 class TesseractRecognizer(LineRecognizer):
     def __init__(
         self,
@@ -19,15 +23,22 @@ class TesseractRecognizer(LineRecognizer):
         Parameters
         ----------
         model : str
-            Tesseract language/model name (e.g. "eng").
+            Tesseract language/model name (e.g. "eng", "news_combo_fast").
         tessdata_dir : str or Path, optional
-            Custom tessdata directory.
+            Custom tessdata directory.  When *None* the recognizer checks
+            the bundled ``models/tessdata/`` directory first, falling back
+            to Tesseract's default search path.
         mode : str
             "line" (psm 7, one call per line) or "region" (psm 6, one call per region).
         """
         if mode not in ("line", "region"):
             raise ValueError(f"mode must be 'line' or 'region', got '{mode}'")
         self.model = model
+        # Auto-detect bundled tessdata when no explicit dir given
+        if tessdata_dir is None:
+            bundled = _BUNDLED_TESSDATA
+            if (bundled / f"{model}.traineddata").exists():
+                tessdata_dir = bundled
         self.tessdata_dir = str(tessdata_dir) if tessdata_dir else None
         self.mode = mode
         self._check_installed()

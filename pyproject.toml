@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "newspaper-ocr"
-version = "0.1.0"
+version = "0.2.0"
 description = "Modular OCR pipeline for historical newspaper scans"
 readme = "README.md"
 license = "MIT"
@@ -50,3 +50,6 @@ newspaper-ocr = "newspaper_ocr.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+newspaper_ocr = ["tessdata/*.traineddata"]
