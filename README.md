@@ -11,9 +11,9 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
  Image ──→ ┌─────────────────┐   ┌──────────────┐   ┌─────────────────┐
             │ Detection       │   │ Recognition  │   │ Text Cleaning   │
  JP2       │ (AS YOLO or     │──→│ (Tesseract,  │──→│ (dehyphenation, │──→ Output
- JPG       │  PP-DocLayout)  │   │  tesserocr,  │   │  line joining)  │    text
- PNG       │                 │   │  EffOCR)     │   │                 │    json
-            │ Layout Proc.   │   │              │   │ Spell Check     │    hOCR
+ JPG       │  PP-DocLayout)  │   │  Kraken,     │   │  line joining)  │    text
+ PNG       │                 │   │  tesserocr,  │   │                 │    json
+            │ Layout Proc.   │   │  EffOCR)     │   │ Spell Check     │    hOCR
             │ (reading order, │   │              │   │ (SymSpell)      │
             │  dedup, merge) │   │              │   │                 │
             └─────────────────┘   └──────────────┘   └─────────────────┘
