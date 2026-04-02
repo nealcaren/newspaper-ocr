@@ -106,10 +106,19 @@ class GlmOcrRecognizer(RegionRecognizer):
                 "  pip install 'transformers>=5.1' torch\n"
                 "Note: GLM-OCR requires transformers>=5.1"
             )
+        import torch
+
         self._processor = AutoProcessor.from_pretrained(self.model_id)
-        self._model = AutoModelForImageTextToText.from_pretrained(
-            self.model_id, torch_dtype="auto", device_map="auto"
-        )
+        # MPS has known issues with GLM-OCR vision position ids;
+        # use CUDA when available, otherwise fall back to CPU.
+        if torch.cuda.is_available():
+            self._model = AutoModelForImageTextToText.from_pretrained(
+                self.model_id, dtype=torch.bfloat16, device_map="auto"
+            )
+        else:
+            self._model = AutoModelForImageTextToText.from_pretrained(
+                self.model_id, dtype=torch.float32
+            )
 
     def _recognize_local(self, image: Image.Image) -> str:
         """Run model directly. Returns text."""
