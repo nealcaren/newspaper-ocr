@@ -60,17 +60,20 @@ class TextCleaner:
             prev_text = current_parts[-1] if current_parts else ""
 
             # Determine how to join this line to the accumulated paragraph text.
-            if self._is_block_break(prev_line, line, median_height, page_width):
-                # Flush the current paragraph and start fresh.
-                paragraphs.append(" ".join(current_parts))
-                current_parts = [text]
-            elif self._should_dehyphenate(prev_text, text):
+            # Dehyphenation takes priority — a hyphenated word spanning two
+            # lines proves they are NOT a paragraph break, regardless of
+            # indent or gap.
+            if self._should_dehyphenate(prev_text, text):
                 # Remove trailing hyphen and merge without space.
                 current_parts[-1] = prev_text.rstrip().rstrip("-")
                 current_parts.append(text)
                 # Combine them now so future logic sees the merged word.
                 merged = "".join(current_parts[-2:])
                 current_parts = current_parts[:-2] + [merged]
+            elif self._is_block_break(prev_line, line, median_height, page_width):
+                # Flush the current paragraph and start fresh.
+                paragraphs.append(" ".join(current_parts))
+                current_parts = [text]
             elif self._is_continuation(prev_text, text):
                 current_parts.append(text)
             else:
