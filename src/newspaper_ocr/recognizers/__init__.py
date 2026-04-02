@@ -6,7 +6,7 @@ RECOGNIZERS = Registry("recognizer")
 try:
     from newspaper_ocr.recognizers.tesseract import TesseractRecognizer
     RECOGNIZERS.register("tesseract", TesseractRecognizer)
-    RECOGNIZERS.register("tesseract-news", lambda **kw: TesseractRecognizer(model="news_combo_fast", **kw))
+    RECOGNIZERS.register("tesseract-news", lambda **kw: TesseractRecognizer(model="news_combo_fast", mode="line", **kw))
 except ImportError:
     pass
 
