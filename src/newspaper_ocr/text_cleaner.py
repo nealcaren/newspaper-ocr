@@ -140,12 +140,22 @@ class TextCleaner:
         if page_width > 0 and shift > _COLUMN_SHIFT_RATIO * page_width:
             return True
 
-        # Terminal punctuation on previous line + next line starts uppercase.
+        # Terminal punctuation on previous line + next line starts uppercase +
+        # previous line is noticeably shorter than full width (i.e. it ends
+        # before the right margin, suggesting a deliberate paragraph break
+        # rather than a sentence that happened to end at line's end).
         prev_text = current_line.text.rstrip()
         if prev_text and prev_text[-1] in _TERMINAL_PUNCT:
             next_stripped = next_line.text.lstrip()
             if next_stripped and next_stripped[0].isupper():
-                return True
+                # Check if prev line is short (doesn't reach right margin)
+                line_width = current_line.bbox.x1 - current_line.bbox.x0
+                if page_width > 0 and line_width < 0.85 * page_width:
+                    return True
+                # Also break if next line is indented relative to prev
+                indent = next_line.bbox.x0 - current_line.bbox.x0
+                if median_height > 0 and indent > median_height:
+                    return True
 
         return False
 
