@@ -140,6 +140,11 @@ class TextCleaner:
         if page_width > 0 and shift > _COLUMN_SHIFT_RATIO * page_width:
             return True
 
+        # Indented next line: almost always a new paragraph in newspapers.
+        indent = next_line.bbox.x0 - current_line.bbox.x0
+        if median_height > 0 and indent > median_height:
+            return True
+
         # Terminal punctuation on previous line + next line starts uppercase +
         # previous line is noticeably shorter than full width (i.e. it ends
         # before the right margin, suggesting a deliberate paragraph break
