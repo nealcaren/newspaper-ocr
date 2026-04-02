@@ -35,6 +35,12 @@ except ImportError:
     pass
 
 try:
+    from newspaper_ocr.recognizers.trocr import TrOCRRecognizer
+    RECOGNIZERS.register("trocr", TrOCRRecognizer)
+except ImportError:
+    pass
+
+try:
     from newspaper_ocr.recognizers.lightonocr import LightOnOcrRecognizer
     RECOGNIZERS.register("lightonocr", LightOnOcrRecognizer)
 except ImportError:

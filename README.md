@@ -11,11 +11,11 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
           ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
           │ Detection        │   │ Recognition      │   │ Text Cleaning    │
 Image ──→ │ (AS YOLO or      │──→│ (Tesseract,      │──→│ (dehyphenation,  │──→ Output
-JP2/JPG/  │  PP-DocLayout)   │   │  Kraken,         │   │  line joining)   │    text
-PNG       │                  │   │  tesserocr,      │   │                  │    json
-          │ Layout Proc.     │   │  EffOCR)         │   │ Spell Check      │    hOCR
-          │ (reading order,  │   │                  │   │ (SymSpell)       │
-          │  dedup, merge)   │   │                  │   │                  │
+JP2/JPG/  │  PP-DocLayout)   │   │  Kraken, TrOCR,  │   │  line joining)   │    text
+PNG       │                  │   │  LightOnOCR,     │   │                  │    json
+          │ Layout Proc.     │   │  GLM-OCR,        │   │ Spell Check      │    hOCR
+          │ (reading order,  │   │  tesserocr,      │   │ (SymSpell)       │
+          │  dedup, merge)   │   │  EffOCR)         │   │                  │
           └──────────────────┘   └──────────────────┘   └──────────────────┘
 ```
 
@@ -36,6 +36,7 @@ pip install newspaper-ocr
 
 # Optional backends:
 pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
+pip install "newspaper-ocr[trocr]"       # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"  # LightOnOCR (best accuracy, GPU required)
 pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
@@ -133,6 +134,8 @@ Three recognition backends with different speed/accuracy tradeoffs.
 | `tesserocr` | line | ~26s | — | C API bindings, no subprocess overhead |
 | `tesserocr` | region | ~25s | — | C API, region-level |
 | `kraken` | line | ~10s | 3.5% | Kraken LSTM, ~10x faster than Tesseract |
+| `trocr` | line | ~35s | 3.6% | Fine-tuned TrOCR, GPU recommended |
+| `glm-ocr` | region | ~300s | 1.7% | GLM-OCR VLM, GPU recommended |
 | `lightonocr` | region | ~500s | **1.1%** | LightOnOCR-2-1B VLM, GPU required |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 
