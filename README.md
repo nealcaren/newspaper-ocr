@@ -36,6 +36,7 @@ pip install newspaper-ocr
 
 # Optional backends:
 pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
+pip install "newspaper-ocr[lightonocr]"  # LightOnOCR (best accuracy, GPU required)
 pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 
@@ -132,6 +133,7 @@ Three recognition backends with different speed/accuracy tradeoffs.
 | `tesserocr` | line | ~26s | — | C API bindings, no subprocess overhead |
 | `tesserocr` | region | ~25s | — | C API, region-level |
 | `kraken` | line | ~10s | 3.5% | Kraken LSTM, ~10x faster than Tesseract |
+| `lightonocr` | region | ~500s | **1.1%** | LightOnOCR-2-1B VLM, GPU required |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 
 *CER measured on pre-1930 newspaper text at R2 (35%) resolution. Times on a single newspaper page (~1,100 lines).
@@ -154,6 +156,16 @@ pipe = Pipeline(recognizer="kraken")
 ```
 
 Requires: `pip install "newspaper-ocr[kraken]"`
+
+### LightOnOCR Backend
+
+LightOnOCR-2-1B achieves the lowest CER (1.1%) on historical newspaper text. Requires GPU (CUDA or MPS).
+
+```python
+pipe = Pipeline(recognizer="lightonocr")
+```
+
+Requires: `pip install "newspaper-ocr[lightonocr]"`
 
 See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for the training pipeline.
 

@@ -33,3 +33,9 @@ try:
     RECOGNIZERS.register("kraken", KrakenRecognizer)
 except ImportError:
     pass
+
+try:
+    from newspaper_ocr.recognizers.lightonocr import LightOnOcrRecognizer
+    RECOGNIZERS.register("lightonocr", LightOnOcrRecognizer)
+except ImportError:
+    pass
