@@ -281,7 +281,7 @@ def _run_line_detection(
         chunk_preds: list[tuple[list[tuple[int, int, int, int]], torch.Tensor, torch.Tensor]] = []
         for chunk in chunks:
             chunk_cv = cv2.cvtColor(np.array(chunk), cv2.COLOR_RGB2BGR)
-            im = _letterbox(chunk_cv, (640, 640))[0]
+            im = _letterbox(chunk_cv, (1280, 1280))[0]
             im = im.transpose((2, 0, 1))[::-1]
             im = (
                 np.expand_dims(np.ascontiguousarray(im), axis=0).astype(np.float32)
@@ -301,11 +301,11 @@ def _run_line_detection(
 
             chunk_w, chunk_h = chunk.size
             if chunk_w > chunk_h:
-                h_ratio = (chunk_h / chunk_w) * 640
-                h_trans = 640 * ((1 - (chunk_h / chunk_w)) / 2)
+                h_ratio = (chunk_h / chunk_w) * 1280
+                h_trans = 1280 * ((1 - (chunk_h / chunk_w)) / 2)
             else:
                 h_trans = 0.0
-                h_ratio = 640.0
+                h_ratio = 1280.0
 
             line_proj_crops: list[tuple[int, int, int, int]] = []
             for bbox in line_bboxes:
