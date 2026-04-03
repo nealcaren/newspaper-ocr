@@ -12,7 +12,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import onnx
 import onnxruntime as ort
 import torch
 from PIL import Image
@@ -63,12 +62,8 @@ LINE_MODEL_FILENAME = "line_model_new.onnx"
 
 def _get_onnx_input_name(model_path: str | Path) -> str:
     """Return the input tensor name for an ONNX model."""
-    model = onnx.load(str(model_path))
-    input_all = [node.name for node in model.graph.input]
-    input_init = [node.name for node in model.graph.initializer]
-    net_input = list(set(input_all) - set(input_init))
-    del model
-    return net_input[0]
+    session = ort.InferenceSession(str(model_path))
+    return session.get_inputs()[0].name
 
 
 def _letterbox(
