@@ -408,23 +408,26 @@ class AsYoloDetector(Detector):
         model_dir: str | Path | None = None,
         layout_model: str | Path | None = None,
         line_model: str | Path | None = None,
+        skip_lines: bool = False,
     ):
+        self._skip_lines = skip_lines
         model_dir_path = Path(model_dir) if model_dir is not None else None
 
         layout_path = _resolve_model_path(
             layout_model, LAYOUT_MODEL_FILENAME, model_dir_path
-        )
-        line_path = _resolve_model_path(
-            line_model, LINE_MODEL_FILENAME, model_dir_path
         )
 
         logger.info("Loading layout model from %s", layout_path)
         self._layout_input_name = _get_onnx_input_name(layout_path)
         self._layout_session = ort.InferenceSession(str(layout_path))
 
-        logger.info("Loading line model from %s", line_path)
-        self._line_input_name = _get_onnx_input_name(line_path)
-        self._line_session = ort.InferenceSession(str(line_path))
+        if not skip_lines:
+            line_path = _resolve_model_path(
+                line_model, LINE_MODEL_FILENAME, model_dir_path
+            )
+            logger.info("Loading line model from %s", line_path)
+            self._line_input_name = _get_onnx_input_name(line_path)
+            self._line_session = ort.InferenceSession(str(line_path))
 
     def detect(self, image: Image.Image) -> PageLayout:
         """Detect layout regions and text lines in a newspaper page image.
@@ -454,17 +457,17 @@ class AsYoloDetector(Detector):
         )
         logger.info("Detected %d layout regions", len(layout_crops))
 
-        # Line detection
-        line_results = _run_line_detection(
-            self._line_session, self._line_input_name, layout_crops
-        )
-        logger.info("Detected %d lines", len(line_results))
-
-        # Build PageLayout
-        # Group lines by layout_idx
+        # Line detection (skip for region-mode recognizers on CPU)
         lines_by_region: dict[int, list[tuple[tuple[int, int, int, int], Image.Image]]] = {}
-        for layout_idx, _cls, _layout_bbox, page_bbox, line_crop in line_results:
-            lines_by_region.setdefault(layout_idx, []).append((page_bbox, line_crop))
+        if not self._skip_lines:
+            line_results = _run_line_detection(
+                self._line_session, self._line_input_name, layout_crops
+            )
+            logger.info("Detected %d lines", len(line_results))
+            for layout_idx, _cls, _layout_bbox, page_bbox, line_crop in line_results:
+                lines_by_region.setdefault(layout_idx, []).append((page_bbox, line_crop))
+        else:
+            logger.info("Skipping line detection (skip_lines=True)")
 
         regions: list[Region] = []
         for layout_idx, (class_label, layout_bbox, layout_crop) in enumerate(

@@ -21,6 +21,7 @@ class Pipeline:
         device: str = "cpu",
         fallback: LineRecognizer | RegionRecognizer | str | None = None,
         fallback_threshold: float = 70,
+        skip_lines: bool = False,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -30,7 +31,7 @@ class Pipeline:
         # Resolve detector
         if isinstance(detector, str):
             det_cls = DETECTORS.get(detector)
-            self.detector = det_cls(model_dir=model_cache_dir)
+            self.detector = det_cls(model_dir=model_cache_dir, skip_lines=skip_lines)
         else:
             self.detector = detector
 
