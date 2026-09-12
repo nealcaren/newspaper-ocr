@@ -259,6 +259,39 @@ available, with a between-token deadline as a portable backstop. A region that
 exhausts its retries gets the text `[OCR timeout]` and `status="timeout"` rather
 than silently empty text.
 
+### Recovering failed regions (splitting + fallback)
+
+For region-level recognizers, two options add a recovery ladder for regions the
+primary model fails on:
+
+```python
+pipe = Pipeline(
+    recognizer="glm-ocr",         # primary
+    fallback="paddleocr-vl",      # backup model for regions the primary failed on
+    chunk_tall_regions=True,      # split tall regions that time out and re-OCR the bands
+)
+```
+
+The ladder runs **primary → chunked re-OCR (same model) → fallback (different
+model)**:
+
+- **`chunk_tall_regions`** — when the primary times out on a region taller than
+  `chunk_height` (default 500px), the crop is split into overlapping vertical
+  bands (`chunk_overlap`, default 50px), each band is re-OCR'd with the *same*
+  recognizer, and the texts are stitched back together (overlap de-duplicated).
+  The region becomes `ok` if every band read, or `chunked_partial` if some band
+  still timed out.
+- **`fallback`** — any region left in a failure state is re-OCR'd by the fallback
+  recognizer, **do-no-harm**: for `timeout`/`error` regions any usable read is
+  taken; for partial regions (`repetition`/`chunked_partial`) the fallback text
+  replaces the primary's only if it is a clean `ok` read. The original text is
+  preserved in `region.text_primary` and the fallback engine recorded in
+  `region.engine`.
+
+`paddleocr-vl` is the intended fallback (a different VLM often succeeds where the
+primary looped or timed out); note it needs an A100-class GPU — it returns empty
+output on some smaller GPUs (e.g. L40S).
+
 One caveat on where you run it: `SIGALRM` can only be armed on the main thread
 of a Unix process, and that is what interrupts a hung call mid-forward-pass. In
 a worker thread (or on Windows) only the between-token deadline applies —
