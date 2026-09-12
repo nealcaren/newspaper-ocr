@@ -56,4 +56,8 @@ class PaddleXDetector(Detector):
                     )
                 )
 
-        return PageLayout(image=image, regions=regions, width=w, height=h)
+        # PP-DocLayout is region-only — it never detects lines, so leave
+        # lines_detected False and let regions through to region-level OCR.
+        return PageLayout(
+            image=image, regions=regions, width=w, height=h, lines_detected=False
+        )

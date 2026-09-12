@@ -18,7 +18,8 @@ Pipeline stages (in order):
   4. _fill_column_gaps – add synthetic text regions for large vertical gaps in columns
   5. _reading_order    – sort regions in newspaper column order (top-to-bottom per column)
   6. _merge_adjacent   – merge vertically adjacent same-column text blocks
-  7. _drop_empty_overlaps – drop OCR-label regions that have no detected lines
+  7. _drop_empty_overlaps – drop OCR-label regions the line detector found
+     nothing in (skipped when no line detection ran — see PageLayout.lines_detected)
 """
 
 from __future__ import annotations
@@ -143,7 +144,7 @@ class LayoutProcessor:
         regions = self._fill_column_gaps(regions, layout.width, layout.height)
         regions = self._reading_order(regions)
         regions = self._merge_adjacent(regions, layout.image)
-        regions = self._drop_empty_overlaps(regions)
+        regions = self._drop_empty_overlaps(regions, layout.lines_detected)
         layout.regions = regions
         return layout
 
@@ -292,8 +293,19 @@ class LayoutProcessor:
     # Stage 3b – Drop empty text regions that overlap content regions
     # ------------------------------------------------------------------
 
-    def _drop_empty_overlaps(self, regions: list[Region]) -> list[Region]:
-        """Remove text-labeled regions with no detected lines — nothing to OCR."""
+    def _drop_empty_overlaps(
+        self, regions: list[Region], lines_detected: bool
+    ) -> list[Region]:
+        """Remove text-labeled regions the line detector found nothing in.
+
+        A text region with no lines is a layout false positive — but only if a
+        line detector actually ran.  When it didn't (``skip_lines=True``, or a
+        region-only detector like PP-DocLayout) every region is line-less, and
+        dropping them all would delete the page; those regions are instead left
+        for the region-level OCR fallback in ``Pipeline.run``.
+        """
+        if not lines_detected:
+            return regions
         return [r for r in regions if len(r.lines) > 0 or r.label not in _OCR_LABELS]
 
     # ------------------------------------------------------------------

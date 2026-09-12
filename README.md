@@ -119,8 +119,18 @@ Ported from the [Dangerous Press](https://dangerouspress.org) production pipelin
 4. **Fill column gaps** using geometric column detection
 5. **Reading order** — column-aware sorting (full-width headers first, then column-by-column)
 6. **Merge** vertically adjacent blocks into coherent regions
+7. **Drop empty text regions** — text-labeled regions the line detector found nothing in
 
 Disable with `layout_processing=False`.
+
+Stage 7 runs only when a line detector actually ran, which the detector reports
+as `PageLayout.lines_detected`. A text region with no lines is a layout false
+positive when something looked and found nothing; when nothing looked — a
+region-only detector such as `paddlex`, or `skip_lines=True` — every region is
+line-less, so the stage is skipped and those regions go on to region-level OCR
+instead. The flag defaults to `False`: a detector has to opt in, because letting
+a false positive through costs one wasted OCR call while wrongly dropping a
+region loses real text.
 
 The tuned constants (column `gap_thresh`, the narrow-column merge, the merge
 height cap, the confidence bands) are a 1:1 port of a specific revision of the

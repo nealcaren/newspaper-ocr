@@ -65,10 +65,24 @@ class Region:
 
 @dataclass
 class PageLayout:
+    """A detected page: its regions, in reading order once processed.
+
+    Attributes
+    ----------
+    lines_detected : bool
+        Whether a line detector ran over this page.  Layout post-processing uses
+        it to tell "the line detector found nothing here" (a text region that is
+        probably a false positive) from "nobody looked" (a region-only detector,
+        or line detection skipped for speed).  Defaults to False so a detector
+        has to opt in: the cost of not setting it is a false positive surviving,
+        while the cost of wrongly setting it is deleting real text.
+    """
+
     image: Image.Image
     regions: list[Region] = field(default_factory=list)
     width: int = 0
     height: int = 0
+    lines_detected: bool = False
 
     @property
     def text(self) -> str:

@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from newspaper_ocr.layout_processor import LayoutProcessor
-from newspaper_ocr.models import BBox, PageLayout, Region
+from newspaper_ocr.models import BBox, Line, PageLayout, Region
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +37,26 @@ def _region(
     )
 
 
-def _layout(regions: list[Region], w: int = 1000, h: int = 1500) -> PageLayout:
-    return PageLayout(image=_img(w, h), regions=regions, width=w, height=h)
+def _layout(
+    regions: list[Region],
+    w: int = 1000,
+    h: int = 1500,
+    lines_detected: bool = False,
+) -> PageLayout:
+    return PageLayout(
+        image=_img(w, h),
+        regions=regions,
+        width=w,
+        height=h,
+        lines_detected=lines_detected,
+    )
+
+
+def _with_lines(region: Region) -> Region:
+    """Attach one line to a region, as a line detector would."""
+    b = region.bbox
+    region.lines = [Line(bbox=BBox(b.x0, b.y0, b.x1, b.y1), image=region.image)]
+    return region
 
 
 # ---------------------------------------------------------------------------
@@ -338,3 +356,59 @@ def test_process_empty_layout():
     layout = _layout([])
     result = lp.process(layout)
     assert result.regions == []
+
+
+# ---------------------------------------------------------------------------
+# Stage 7 – dropping regions the line detector found nothing in
+# ---------------------------------------------------------------------------
+
+def test_drop_empty_overlaps_drops_lineless_text_when_lines_were_detected():
+    """A text region with no lines is a layout false positive — if we looked."""
+    lp = LayoutProcessor()
+    regions = [_with_lines(_region(0, 0, 500, 200)), _region(0, 300, 500, 500)]
+    result = lp._drop_empty_overlaps(regions, lines_detected=True)
+    assert [r.bbox.y0 for r in result] == [0]
+
+
+def test_drop_empty_overlaps_keeps_non_text_labels():
+    """Ads, figures and tables legitimately have no lines — they get region OCR."""
+    lp = LayoutProcessor()
+    regions = [_region(0, 0, 500, 200, label="figure"), _region(0, 300, 500, 500, label="table")]
+    result = lp._drop_empty_overlaps(regions, lines_detected=True)
+    assert len(result) == 2
+
+
+def test_drop_empty_overlaps_is_skipped_when_no_line_detection_ran():
+    """No lines anywhere means nobody looked, not that the page is empty."""
+    lp = LayoutProcessor()
+    regions = [_region(0, 0, 500, 200), _region(0, 300, 500, 500, label="doc_title")]
+    result = lp._drop_empty_overlaps(regions, lines_detected=False)
+    assert len(result) == 2
+
+
+def test_process_keeps_text_regions_from_a_region_only_detector():
+    """PP-DocLayout / skip_lines=True: every region is line-less.
+
+    Gating stage 7 on lines_detected is what stops this page being deleted
+    outright before it ever reaches recognition.
+    """
+    lp = LayoutProcessor()
+    regions = [
+        _region(0, 0, 500, 200, text="headline", label="doc_title"),
+        _region(0, 300, 500, 600, text="body copy"),
+    ]
+    result = lp.process(_layout(regions, lines_detected=False))
+    assert len(result.regions) == 2
+
+
+def test_process_drops_lineless_text_when_lines_were_detected():
+    """The false-positive filter still does its job in the normal path."""
+    lp = LayoutProcessor()
+    regions = [
+        _with_lines(_region(0, 0, 500, 200, text="real")),
+        _region(0, 900, 500, 1100, text="false positive"),
+    ]
+    result = lp.process(_layout(regions, lines_detected=True))
+    texts = " ".join(r.text for r in result.regions)
+    assert "real" in texts
+    assert "false positive" not in texts

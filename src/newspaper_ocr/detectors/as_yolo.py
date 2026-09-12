@@ -497,4 +497,5 @@ class AsYoloDetector(Detector):
             regions=regions,
             width=image.width,
             height=image.height,
+            lines_detected=not self._skip_lines,
         )
