@@ -98,7 +98,14 @@ class Pipeline:
             line.confidence = 1.0  # VLM fallback is trusted
             return line
 
-    def run(self, image: Image.Image) -> str:
+    def analyze(self, image: Image.Image) -> PageLayout:
+        """Detect, recognize and post-process a page, returning the layout.
+
+        This is :meth:`run` without the formatting step, for callers that need
+        the regions themselves — a review site, an article-segmentation pass, or
+        anything that wants to emit more than one representation of a page
+        without OCRing it twice.
+        """
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
 
@@ -148,7 +155,11 @@ class Pipeline:
             layout = self.text_cleaner.clean(layout)
 
         layout = self.spell_checker.check(layout)
-        return self.formatter.format(layout)
+        return layout
+
+    def run(self, image: Image.Image) -> str:
+        """Analyze a page and render it with the configured formatter."""
+        return self.formatter.format(self.analyze(image))
 
     def ocr(self, path: str | Path, output: str | None = None) -> str:
         image = Image.open(str(path)).convert("RGB")

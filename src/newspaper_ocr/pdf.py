@@ -66,7 +66,8 @@ def _largest_embedded_image(doc, page) -> Image.Image | None:
     best_xref = None
     best_area = 0
     for info in page.get_images(full=True):
-        xref, _smask, width, height = info[0], info[1], info[2], info[3]
+        # (xref, smask, width, height, ...) — see PyMuPDF's Page.get_images.
+        xref, width, height = info[0], info[2], info[3]
         area = width * height
         if area > best_area:
             best_xref, best_area = xref, area

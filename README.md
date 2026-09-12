@@ -310,6 +310,7 @@ checker = SpellChecker(dictionary_path="my_newspaper_words.txt")
 | `text` | `--output text` | Plain text, paragraphs separated by blank lines |
 | `json` | `--output json` | Structured: regions, lines, bounding boxes, confidence, status |
 | `hocr` | `--output hocr` | HTML with spatial coordinates (for text overlay on images) |
+| `viewer` | `--output viewer` | OpenSeadragon review page: the scan, clickable region boxes, synced text pane (also registered as `html`) |
 
 ### JSON schema
 
@@ -330,6 +331,45 @@ article segmentation, LLM enrichment). Each region carries:
 images: `timeout` means the recognizer hit its wall-clock budget (the text is
 the placeholder `[OCR timeout]`), `repetition` means the model looped and the
 text was truncated, and `error` means recognition raised.
+
+## Review Site
+
+Checking a run means looking at the scan next to the text. `ReviewSite` writes a
+static site that does that: one OpenSeadragon page per scan, an index over the
+issue, and a `manifest.json` with every region.
+
+```python
+from newspaper_ocr import Pipeline
+from newspaper_ocr.pdf import page_images
+from newspaper_ocr.viewer import ReviewSite
+
+pipe = Pipeline(recognizer="glm-ocr")
+site = ReviewSite("site/industrial-worker-1912-05-01", title="Industrial Worker")
+
+for image in page_images("issue.pdf", rotate=90):
+    site.add_page(pipe.analyze(image))
+
+site.write()
+```
+
+`Pipeline.analyze` is `run` without the formatting step — it returns the
+`PageLayout`, so a page can be written to the site and to JSON without OCRing it
+twice.
+
+On a page: click a region on the scan and its text scrolls into view; click a
+paragraph and the viewer zooms to its box. Regions are tinted by `status`, so
+timeouts and truncated loops stand out instead of hiding in the JSON. Dragging
+pans as usual — only a click selects.
+
+`manifest.json` is the machine-readable half, carrying each page's dimensions and
+every region's `id`, `label`, `bbox`, `text`, `status` and `confidence`, plus
+per-page and whole-issue status counts. A re-OCR pass can find the regions worth
+redoing from it without touching the images.
+
+Pages load OpenSeadragon from a CDN, so the site needs network access to work.
+For an offline or archival copy, drop `openseadragon.min.js` (and its `images/`
+sprite directory) into the output and pass `openseadragon_url=`. Page scans are
+written to `scans/` precisely so they don't collide with those sprites.
 
 ## Architecture
 
