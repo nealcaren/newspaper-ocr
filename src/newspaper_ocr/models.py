@@ -32,7 +32,13 @@ class Line:
 
 
 # Per-region OCR outcomes recorded in Region.status.
-REGION_STATUSES = ("ok", "timeout", "repetition", "error")
+#   ok              — clean read
+#   timeout         — recognizer exceeded its wall-clock budget
+#   repetition      — model looped; text was truncated
+#   error           — recognition raised
+#   chunked_partial — a tall region was split into vertical chunks and at least
+#                     one chunk timed out, so the merged text is real but incomplete
+REGION_STATUSES = ("ok", "timeout", "repetition", "error", "chunked_partial")
 
 
 @dataclass
@@ -61,6 +67,14 @@ class Region:
     confidence: float = 0.0
     status: str = "ok"
     id: str = ""
+    #: When a fallback recognizer replaces the primary text (do-no-harm
+    #: recovery), the primary's original text is kept here so the swap is
+    #: reversible and auditable.
+    text_primary: str = ""
+    #: Which engine produced the final text, when it wasn't the primary
+    #: recognizer — e.g. the fallback recognizer's class name. Empty means the
+    #: primary recognizer's result was kept.
+    engine: str = ""
 
 
 @dataclass

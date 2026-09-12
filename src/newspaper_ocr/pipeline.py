@@ -1,10 +1,17 @@
 from __future__ import annotations
 from pathlib import Path
 from PIL import Image
+from newspaper_ocr import chunking
 from newspaper_ocr.models import Region, PageLayout
 from newspaper_ocr.detectors.base import Detector
 from newspaper_ocr.recognizers.base import LineRecognizer, RegionRecognizer
 from newspaper_ocr.formatters.base import Formatter
+
+#: Region statuses that make a region eligible for fallback re-OCR.
+#:   no-loss  — nothing usable to preserve, so any usable fallback read wins
+#:   partial  — real but degraded text, so only a clean fallback read replaces it
+_FALLBACK_NO_LOSS = {"timeout", "error"}
+_FALLBACK_PARTIAL = {"repetition", "chunked_partial"}
 
 
 class Pipeline:
@@ -22,6 +29,9 @@ class Pipeline:
         fallback: LineRecognizer | RegionRecognizer | str | None = None,
         fallback_threshold: float = 70,
         skip_lines: bool = False,
+        chunk_tall_regions: bool = False,
+        chunk_height: int = chunking.CHUNK_HEIGHT,
+        chunk_overlap: int = chunking.CHUNK_OVERLAP,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -69,6 +79,11 @@ class Pipeline:
         # line.confidence * 100 at runtime.
         self.fallback_threshold = fallback_threshold
 
+        # Tall-region splitting for region-level recognizers (see _chunk_region).
+        self.chunk_tall_regions = chunk_tall_regions
+        self.chunk_height = chunk_height
+        self.chunk_overlap = chunk_overlap
+
         # Layout post-processing
         self.layout_processor = LayoutProcessor(enabled=layout_processing)
 
@@ -97,6 +112,64 @@ class Pipeline:
             line.text = result.text
             line.confidence = 1.0  # VLM fallback is trusted
             return line
+
+    def _chunk_region(self, region: Region) -> Region:
+        """Re-OCR a tall region by splitting it into vertical bands.
+
+        Called when the primary recognizer timed out on a region taller than
+        ``chunk_height``. Each band is OCR'd with the same recognizer and the
+        texts are stitched back together. Status becomes ``ok`` if every band
+        was read, ``chunked_partial`` if some band timed out but others produced
+        text, or ``timeout`` if nothing came back.
+        """
+        width, height = region.image.size
+        spans = chunking.chunk_spans(height, self.chunk_height, self.chunk_overlap)
+
+        texts: list[str] = []
+        any_timeout = False
+        for y0, y1 in spans:
+            band = Region(
+                bbox=region.bbox,
+                image=region.image.crop((0, y0, width, y1)),
+                label=region.label,
+            )
+            band = self.recognizer.recognize(band)
+            if band.status == "timeout":
+                any_timeout = True
+            elif band.text:
+                texts.append(band.text)
+
+        if not texts:
+            return region  # keep the primary's timeout text/status
+        region.text = chunking.merge_chunk_texts(texts)
+        region.status = "chunked_partial" if any_timeout else "ok"
+        return region
+
+    def _apply_region_fallback(self, region: Region) -> Region:
+        """Re-OCR a failed region with the fallback recognizer, do no harm.
+
+        For no-loss statuses (timeout/error) any usable fallback read is taken;
+        for partial statuses (repetition/chunked_partial) the fallback read only
+        replaces the primary text if it is a clean ``ok``. The original text is
+        preserved in ``region.text_primary`` so the swap is reversible.
+        """
+        no_loss = region.status in _FALLBACK_NO_LOSS
+        if not (no_loss or region.status in _FALLBACK_PARTIAL):
+            return region
+
+        result = self.fallback.recognize(
+            Region(bbox=region.bbox, image=region.image, label=region.label)
+        )
+        if not result.text.strip() or result.status in ("timeout", "error"):
+            return region  # fallback gave nothing usable
+
+        accept = result.status in ("ok", "repetition") if no_loss else result.status == "ok"
+        if accept:
+            region.text_primary = region.text
+            region.text = result.text
+            region.status = result.status
+            region.engine = type(self.fallback).__name__
+        return region
 
     def analyze(self, image: Image.Image) -> PageLayout:
         """Detect, recognize and post-process a page, returning the layout.
@@ -132,7 +205,19 @@ class Pipeline:
                     self.recognizer.recognize_region(region)
         elif isinstance(self.recognizer, RegionRecognizer):
             for i, region in enumerate(layout.regions):
-                layout.regions[i] = self.recognizer.recognize(region)
+                region = self.recognizer.recognize(region)
+                # Escalation ladder: primary -> chunked re-OCR (same model, for
+                # a tall region that timed out) -> fallback recognizer.
+                if (
+                    self.chunk_tall_regions
+                    and region.status == "timeout"
+                    and region.image is not None
+                    and region.image.size[1] > self.chunk_height
+                ):
+                    region = self._chunk_region(region)
+                if isinstance(self.fallback, RegionRecognizer):
+                    region = self._apply_region_fallback(region)
+                layout.regions[i] = region
 
         # Fallback: re-recognize low-confidence lines with the fallback recognizer.
         # Only applies when the primary recognizer is a LineRecognizer (so we have
