@@ -5,18 +5,19 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
 ## Pipeline
 
 ```
-           Phase 1               Phase 2              Phase 3
-           LAYOUT                OCR                  POST-PROCESSING
+           Phase 1                    Phase 2                    Phase 3
+           LAYOUT                     OCR                        POST-PROCESSING
 
-          ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-          │ Detection        │   │ Recognition      │   │ Text Cleaning    │
-Image ──→ │ (AS YOLO or      │──→│ (Tesseract,      │──→│ (dehyphenation,  │──→ Output
-JP2/JPG/  │  PP-DocLayout)   │   │  Kraken, TrOCR,  │   │  line joining)   │    text
-PNG       │                  │   │  LightOnOCR,     │   │                  │    json
-          │ Layout Proc.     │   │  GLM-OCR,        │   │ Spell Check      │    hOCR
-          │ (reading order,  │   │  tesserocr,      │   │ (SymSpell)       │
-          │  dedup, merge)   │   │  EffOCR)         │   │                  │
-          └──────────────────┘   └──────────────────┘   └──────────────────┘
+          ┌──────────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
+          │ Detection            │   │ Recognition          │   │ Text Cleaning        │
+          │ (AS YOLO,            │   │ (Tesseract,          │   │ (dehyphenation,      │
+Image ──→ │  DocLayout-YOLO,     │──→│  tesserocr, Kraken,  │──→│  line joining)       │──→ Output
+JP2/JPG/  │  PP-DocLayout)       │   │  TrOCR, GLM-OCR,     │   │                      │    text
+PNG/PDF   │                      │   │  LightOnOCR,         │   │ Spell Check          │    json
+          │ Layout Proc.         │   │  PaddleOCR-VL,       │   │ (SymSpell)           │    hOCR
+          │ (reading order,      │   │  EffOCR)             │   │                      │    viewer
+          │  dedup, merge)       │   │                      │   │                      │
+          └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
 
 **Phase 1 — Layout:** Detect regions (articles, headlines, ads) and text lines. Reorder into newspaper reading order (columns left-to-right, top-to-bottom). Deduplicate overlapping detections, fill gaps.
