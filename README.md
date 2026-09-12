@@ -142,7 +142,7 @@ for i, image in enumerate(page_images("issue.pdf", rotate=90)):
 
 ## Phase 1: Layout
 
-Two detection backends, plus battle-tested newspaper layout post-processing.
+Three detection backends, plus battle-tested newspaper layout post-processing.
 
 ### Detectors
 
@@ -183,7 +183,7 @@ changes column segmentation, and therefore the output text, for every page.
 
 ## Phase 2: OCR
 
-Three recognition backends with different speed/accuracy tradeoffs.
+Recognition backends with different speed/accuracy tradeoffs.
 
 | Backend | Mode | Speed | CER* | How it works |
 |---------|------|-------|------|-------------|
@@ -360,14 +360,16 @@ article segmentation, LLM enrichment). Each region carries:
 | `label` | Region class from the detector (`text`, `title`, ...) |
 | `bbox` | `x0`, `y0`, `x1`, `y1` in page pixels |
 | `text` | Recognized text |
-| `status` | `ok`, `timeout`, `repetition`, or `error` |
+| `status` | `ok`, `timeout`, `repetition`, `error`, or `chunked_partial` |
 | `confidence` | Detection confidence |
 | `lines` | Per-line `text` / `confidence` / `bbox`, when the recognizer is line-level |
 
 `status` is how a caller finds regions worth re-OCRing without re-reading the
 images: `timeout` means the recognizer hit its wall-clock budget (the text is
 the placeholder `[OCR timeout]`), `repetition` means the model looped and the
-text was truncated, and `error` means recognition raised.
+text was truncated, `error` means recognition raised, and `chunked_partial`
+means a tall region was split into bands and at least one band still failed, so
+the merged text is real but incomplete.
 
 ## Review Site
 
