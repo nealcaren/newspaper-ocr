@@ -156,3 +156,28 @@ class Pipeline:
 
     def ocr_batch(self, paths: list[str | Path]) -> list[str]:
         return [self.ocr(p) for p in paths]
+
+    def ocr_pdf(
+        self,
+        path: str | Path,
+        rotate: int = 0,
+        dpi: int = 300,
+        pages: range | list[int] | None = None,
+    ) -> list[str]:
+        """OCR a multi-page PDF, returning one formatted result per page.
+
+        Each page is taken from its largest embedded image when it has one (the
+        first embedded image is often a scanning-service banner, not the page),
+        and rendered at *dpi* otherwise.  ``rotate`` turns each page clockwise by
+        0, 90, 180 or 270 degrees before layout detection — sideways broadsheets
+        produce nothing usable otherwise.
+
+        Use :func:`newspaper_ocr.pdf.page_images` directly to stream pages
+        without holding every page's output in memory.
+        """
+        from newspaper_ocr.pdf import page_images
+
+        return [
+            self.run(image)
+            for image in page_images(path, dpi=dpi, rotate=rotate, pages=pages)
+        ]

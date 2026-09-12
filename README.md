@@ -98,6 +98,46 @@ newspaper-ocr page.jp2 --model news_combo_fast
 newspaper-ocr page.jp2 --no-layout-processing --no-text-cleaning
 ```
 
+## PDF Input
+
+Most scans arrive as multi-page PDFs rather than loose images.
+
+```python
+pipe = Pipeline(recognizer="glm-ocr", output="json")
+
+# One formatted result per page
+pages = pipe.ocr_pdf("issue.pdf")
+
+# Sideways broadsheet, turned clockwise before layout detection
+pages = pipe.ocr_pdf("industrial-worker-1912.pdf", rotate=90)
+```
+
+Requires: `pip install "newspaper-ocr[pdf]"`
+
+Each page is taken from its **largest embedded image**, not the first one. Pages
+scanned by Google carry a small "Digitized by Google" strip ahead of the page
+image, so taking `images[0]` yields a few-hundred-pixel sliver instead of the
+broadsheet. Pages with no embedded image at all (born-digital, vector text) are
+rendered at `dpi` instead, 300 by default.
+
+`rotate` accepts 0, 90, 180 or 270 **clockwise**, applied before layout
+detection — a sideways page produces nothing usable, and titles in the same
+collection are sometimes scanned in opposite directions, so it is a per-run
+choice rather than a constant.
+
+To stream pages without holding every page's output in memory, use the
+front-end directly:
+
+```python
+from newspaper_ocr.pdf import page_images
+
+for i, image in enumerate(page_images("issue.pdf", rotate=90)):
+    Path(f"page-{i:03d}.json").write_text(pipe.run(image))
+```
+
+`page_images` also takes `pages=` to select a subset (zero-based) and
+`prefer_embedded=False` to always render.
+
 ## Phase 1: Layout
 
 Two detection backends, plus battle-tested newspaper layout post-processing.
