@@ -39,6 +39,7 @@ pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
 pip install "newspaper-ocr[trocr]"       # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"  # LightOnOCR (best accuracy, GPU required)
 pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
+pip install "newspaper-ocr[paddleocr-vl]" # PaddleOCR-VL VLM (good failure-recovery fallback)
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector
 
@@ -195,6 +196,7 @@ Three recognition backends with different speed/accuracy tradeoffs.
 | `trocr` | line | ~35s | 3.6% | Fine-tuned TrOCR, GPU recommended |
 | `glm-ocr` | region | ~300s | 1.7% | GLM-OCR VLM, GPU recommended |
 | `lightonocr` | region | ~500s | **1.1%** | LightOnOCR-2-1B VLM, GPU required |
+| `paddleocr-vl` | region | varies | — | PaddleOCR-VL VLM, GPU recommended; good fallback for regions another model failed on |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 
 *CER measured on pre-1930 newspaper text at R2 (35%) resolution. Times on a single newspaper page (~1,100 lines).
