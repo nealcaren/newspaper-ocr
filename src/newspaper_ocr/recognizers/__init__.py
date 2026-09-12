@@ -45,3 +45,9 @@ try:
     RECOGNIZERS.register("lightonocr", LightOnOcrRecognizer)
 except ImportError:
     pass
+
+try:
+    from newspaper_ocr.recognizers.paddleocr_vl import PaddleOcrVlRecognizer
+    RECOGNIZERS.register("paddleocr-vl", PaddleOcrVlRecognizer)
+except ImportError:
+    pass
