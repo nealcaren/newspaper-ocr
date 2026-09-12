@@ -8,6 +8,10 @@ from PIL import Image
 from newspaper_ocr.models import BBox, PageLayout, Region
 from newspaper_ocr.spell_checker import SpellChecker
 
+# SpellChecker imports symspellpy lazily, so the module imports fine without it
+# but every test here constructs one.  It ships in the dev extra.
+pytest.importorskip("symspellpy", reason="spell correction is an optional extra")
+
 
 # ---------------------------------------------------------------------------
 # Helpers

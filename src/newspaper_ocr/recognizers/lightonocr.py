@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import re
 import tempfile
 from pathlib import Path
 
 from PIL import Image
 
+from newspaper_ocr import repetition
+from newspaper_ocr.errors import is_timeout
 from newspaper_ocr.models import Region
 from newspaper_ocr.recognizers.base import RegionRecognizer
 
@@ -30,6 +31,8 @@ class LightOnOcrRecognizer(RegionRecognizer):
         model_id: str = "lightonai/LightOnOCR-2-1B-base",
         device: str | None = None,
         max_new_tokens: int = 512,
+        repetition_min_len: int = repetition.MIN_LEN,
+        repetition_min_reps: int = repetition.MIN_REPS,
     ):
         try:
             import torch
@@ -53,6 +56,8 @@ class LightOnOcrRecognizer(RegionRecognizer):
 
         self.device = device
         self.max_new_tokens = max_new_tokens
+        self.repetition_min_len = repetition_min_len
+        self.repetition_min_reps = repetition_min_reps
         self._torch = torch
 
         dtype = torch.bfloat16 if device == "cuda" else torch.float32
@@ -62,23 +67,9 @@ class LightOnOcrRecognizer(RegionRecognizer):
             model_id, torch_dtype=dtype
         ).to(device)
 
-    @staticmethod
-    def _has_repetition(text: str, min_len: int = 10, threshold: int = 3) -> bool:
-        if len(text) < min_len * threshold:
-            return False
-        for length in range(min_len, len(text) // threshold + 1):
-            pattern = re.escape(text[:length])
-            if len(re.findall(pattern, text)) >= threshold:
-                return True
-        return False
-
-    @staticmethod
-    def _truncate_repetition(text: str, min_len: int = 10) -> str:
-        for length in range(min_len, len(text) // 2 + 1):
-            candidate = text[:length]
-            if text[length:].startswith(candidate):
-                return candidate.strip()
-        return text.strip()
+    # Shared with the other VLM recognizers; see newspaper_ocr.repetition.
+    _has_repetition = staticmethod(repetition.has_repetition)
+    _truncate_repetition = staticmethod(repetition.truncate_repetition)
 
     def recognize(self, region: Region) -> Region:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
@@ -107,12 +98,19 @@ class LightOnOcrRecognizer(RegionRecognizer):
                 skip_special_tokens=True,
             ).strip()
 
-            if self._has_repetition(text):
-                text = self._truncate_repetition(text)
-
-            region.text = text
-        except Exception:
+            if repetition.has_repetition(
+                text, self.repetition_min_len, self.repetition_min_reps
+            ):
+                region.text = repetition.truncate_repetition(
+                    text, self.repetition_min_len
+                )
+                region.status = "repetition"
+            else:
+                region.text = text
+                region.status = "ok"
+        except Exception as exc:
             region.text = ""
+            region.status = "timeout" if is_timeout(exc) else "error"
         finally:
             Path(tmp_path).unlink(missing_ok=True)
 

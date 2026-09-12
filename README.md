@@ -98,6 +98,46 @@ newspaper-ocr page.jp2 --model news_combo_fast
 newspaper-ocr page.jp2 --no-layout-processing --no-text-cleaning
 ```
 
+## PDF Input
+
+Most scans arrive as multi-page PDFs rather than loose images.
+
+```python
+pipe = Pipeline(recognizer="glm-ocr", output="json")
+
+# One formatted result per page
+pages = pipe.ocr_pdf("issue.pdf")
+
+# Sideways broadsheet, turned clockwise before layout detection
+pages = pipe.ocr_pdf("industrial-worker-1912.pdf", rotate=90)
+```
+
+Requires: `pip install "newspaper-ocr[pdf]"`
+
+Each page is taken from its **largest embedded image**, not the first one. Pages
+scanned by Google carry a small "Digitized by Google" strip ahead of the page
+image, so taking `images[0]` yields a few-hundred-pixel sliver instead of the
+broadsheet. Pages with no embedded image at all (born-digital, vector text) are
+rendered at `dpi` instead, 300 by default.
+
+`rotate` accepts 0, 90, 180 or 270 **clockwise**, applied before layout
+detection — a sideways page produces nothing usable, and titles in the same
+collection are sometimes scanned in opposite directions, so it is a per-run
+choice rather than a constant.
+
+To stream pages without holding every page's output in memory, use the
+front-end directly:
+
+```python
+from newspaper_ocr.pdf import page_images
+
+for i, image in enumerate(page_images("issue.pdf", rotate=90)):
+    Path(f"page-{i:03d}.json").write_text(pipe.run(image))
+```
+
+`page_images` also takes `pages=` to select a subset (zero-based) and
+`prefer_embedded=False` to always render.
+
 ## Phase 1: Layout
 
 Two detection backends, plus battle-tested newspaper layout post-processing.
@@ -119,8 +159,24 @@ Ported from the [Dangerous Press](https://dangerouspress.org) production pipelin
 4. **Fill column gaps** using geometric column detection
 5. **Reading order** — column-aware sorting (full-width headers first, then column-by-column)
 6. **Merge** vertically adjacent blocks into coherent regions
+7. **Drop empty text regions** — text-labeled regions the line detector found nothing in
 
 Disable with `layout_processing=False`.
+
+Stage 7 runs only when a line detector actually ran, which the detector reports
+as `PageLayout.lines_detected`. A text region with no lines is a layout false
+positive when something looked and found nothing; when nothing looked — a
+region-only detector such as `paddlex`, or `skip_lines=True` — every region is
+line-less, so the stage is skipped and those regions go on to region-level OCR
+instead. The flag defaults to `False`: a detector has to opt in, because letting
+a false positive through costs one wasted OCR call while wrongly dropping a
+region loses real text.
+
+The tuned constants (column `gap_thresh`, the narrow-column merge, the merge
+height cap, the confidence bands) are a 1:1 port of a specific revision of the
+production pipeline, pinned as `newspaper_ocr.PIPELINE_REFERENCE_TAG`
+(`2025-03-07-col-fix`). Diff against that tag before changing them — drift here
+changes column segmentation, and therefore the output text, for every page.
 
 ## Phase 2: OCR
 
@@ -170,6 +226,51 @@ pipe = Pipeline(recognizer="lightonocr")
 
 Requires: `pip install "newspaper-ocr[lightonocr]"`
 
+### GLM-OCR Backend
+
+```python
+pipe = Pipeline(recognizer="glm-ocr")
+```
+
+Runs either against a local MLX/vLLM server (`mode="api"`, the default) or
+directly through transformers on a GPU (`mode="local"`).
+
+```python
+from newspaper_ocr.recognizers.glm_ocr import GlmOcrRecognizer
+
+pipe = Pipeline(
+    recognizer=GlmOcrRecognizer(
+        mode="local",
+        timeout=25,              # per-region wall-clock budget, both modes
+        max_retries=2,
+        repetition_min_len=20,   # loop detector, production defaults
+        repetition_min_reps=5,
+    )
+)
+```
+
+`timeout` is enforced in local mode as well as API mode, so a pathological
+region can't hang a whole batch: generation is guarded by `SIGALRM` where it is
+available, with a between-token deadline as a portable backstop. A region that
+exhausts its retries gets the text `[OCR timeout]` and `status="timeout"` rather
+than silently empty text.
+
+One caveat on where you run it: `SIGALRM` can only be armed on the main thread
+of a Unix process, and that is what interrupts a hung call mid-forward-pass. In
+a worker thread (or on Windows) only the between-token deadline applies —
+generation still stops at the budget, but a call that hangs *inside* a single
+forward pass is reported as a timeout only once it returns. Run batches on the
+main thread if you need hangs bounded rather than just detected.
+
+The loop detector slides windows across the whole region text and counts
+occurrences; on a hit the text is cut just after the second occurrence of the
+repeated phrase and the region is marked `status="repetition"`. Defaults match
+the production pipeline (`2025-03-07-col-fix`); lower `repetition_min_reps` to
+catch loops sooner, raise `repetition_min_len` if legitimately repeated short
+phrases are being clipped.
+
+Requires: `pip install "newspaper-ocr[glm-ocr]"`
+
 See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for the training pipeline.
 
 ## Phase 3: Post-Processing
@@ -207,8 +308,68 @@ checker = SpellChecker(dictionary_path="my_newspaper_words.txt")
 | Format | Flag | Content |
 |--------|------|---------|
 | `text` | `--output text` | Plain text, paragraphs separated by blank lines |
-| `json` | `--output json` | Structured: regions, lines, bounding boxes, confidence |
+| `json` | `--output json` | Structured: regions, lines, bounding boxes, confidence, status |
 | `hocr` | `--output hocr` | HTML with spatial coordinates (for text overlay on images) |
+| `viewer` | `--output viewer` | OpenSeadragon review page: the scan, clickable region boxes, synced text pane (also registered as `html`) |
+
+### JSON schema
+
+The JSON formatter is the stable contract for downstream passes (review sites,
+article segmentation, LLM enrichment). Each region carries:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable per-page handle, `r0`, `r1`, ... in reading order |
+| `label` | Region class from the detector (`text`, `title`, ...) |
+| `bbox` | `x0`, `y0`, `x1`, `y1` in page pixels |
+| `text` | Recognized text |
+| `status` | `ok`, `timeout`, `repetition`, or `error` |
+| `confidence` | Detection confidence |
+| `lines` | Per-line `text` / `confidence` / `bbox`, when the recognizer is line-level |
+
+`status` is how a caller finds regions worth re-OCRing without re-reading the
+images: `timeout` means the recognizer hit its wall-clock budget (the text is
+the placeholder `[OCR timeout]`), `repetition` means the model looped and the
+text was truncated, and `error` means recognition raised.
+
+## Review Site
+
+Checking a run means looking at the scan next to the text. `ReviewSite` writes a
+static site that does that: one OpenSeadragon page per scan, an index over the
+issue, and a `manifest.json` with every region.
+
+```python
+from newspaper_ocr import Pipeline
+from newspaper_ocr.pdf import page_images
+from newspaper_ocr.viewer import ReviewSite
+
+pipe = Pipeline(recognizer="glm-ocr")
+site = ReviewSite("site/industrial-worker-1912-05-01", title="Industrial Worker")
+
+for image in page_images("issue.pdf", rotate=90):
+    site.add_page(pipe.analyze(image))
+
+site.write()
+```
+
+`Pipeline.analyze` is `run` without the formatting step — it returns the
+`PageLayout`, so a page can be written to the site and to JSON without OCRing it
+twice.
+
+On a page: click a region on the scan and its text scrolls into view; click a
+paragraph and the viewer zooms to its box. Regions are tinted by `status`, so
+timeouts and truncated loops stand out instead of hiding in the JSON. Dragging
+pans as usual — only a click selects.
+
+`manifest.json` is the machine-readable half, carrying each page's dimensions and
+every region's `id`, `label`, `bbox`, `text`, `status` and `confidence`, plus
+per-page and whole-issue status counts. A re-OCR pass can find the regions worth
+redoing from it without touching the images.
+
+Pages load OpenSeadragon from a CDN, so the site needs network access to work.
+For an offline or archival copy, drop `openseadragon.min.js` (and its `images/`
+sprite directory) into the output and pass `openseadragon_url=`. Page scans are
+written to `scans/` precisely so they don't collide with those sprites.
 
 ## Architecture
 

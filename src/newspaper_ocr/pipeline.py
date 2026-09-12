@@ -98,9 +98,21 @@ class Pipeline:
             line.confidence = 1.0  # VLM fallback is trusted
             return line
 
-    def run(self, image: Image.Image) -> str:
+    def analyze(self, image: Image.Image) -> PageLayout:
+        """Detect, recognize and post-process a page, returning the layout.
+
+        This is :meth:`run` without the formatting step, for callers that need
+        the regions themselves — a review site, an article-segmentation pass, or
+        anything that wants to emit more than one representation of a page
+        without OCRing it twice.
+        """
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
+
+        # Stable per-page handles for downstream consumers, in reading order.
+        for i, region in enumerate(layout.regions):
+            if not region.id:
+                region.id = f"r{i}"
 
         # Region-level recognition: recognizer has recognize_region and mode == "region"
         if (
@@ -143,7 +155,11 @@ class Pipeline:
             layout = self.text_cleaner.clean(layout)
 
         layout = self.spell_checker.check(layout)
-        return self.formatter.format(layout)
+        return layout
+
+    def run(self, image: Image.Image) -> str:
+        """Analyze a page and render it with the configured formatter."""
+        return self.formatter.format(self.analyze(image))
 
     def ocr(self, path: str | Path, output: str | None = None) -> str:
         image = Image.open(str(path)).convert("RGB")
@@ -151,3 +167,28 @@ class Pipeline:
 
     def ocr_batch(self, paths: list[str | Path]) -> list[str]:
         return [self.ocr(p) for p in paths]
+
+    def ocr_pdf(
+        self,
+        path: str | Path,
+        rotate: int = 0,
+        dpi: int = 300,
+        pages: range | list[int] | None = None,
+    ) -> list[str]:
+        """OCR a multi-page PDF, returning one formatted result per page.
+
+        Each page is taken from its largest embedded image when it has one (the
+        first embedded image is often a scanning-service banner, not the page),
+        and rendered at *dpi* otherwise.  ``rotate`` turns each page clockwise by
+        0, 90, 180 or 270 degrees before layout detection — sideways broadsheets
+        produce nothing usable otherwise.
+
+        Use :func:`newspaper_ocr.pdf.page_images` directly to stream pages
+        without holding every page's output in memory.
+        """
+        from newspaper_ocr.pdf import page_images
+
+        return [
+            self.run(image)
+            for image in page_images(path, dpi=dpi, rotate=rotate, pages=pages)
+        ]

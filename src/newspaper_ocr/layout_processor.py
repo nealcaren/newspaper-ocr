@@ -3,6 +3,14 @@
 Ported from the dangerouspress-ocr production pipeline (ocr_pipeline.py).
 Adapts dict-based logic to use the Region / PageLayout data model.
 
+The port tracks a specific revision of that pipeline, recorded in
+:data:`PIPELINE_REFERENCE_TAG`.  The tuned constants below are the ones that
+must stay in sync with it: ``gap_thresh = median_w * 0.3`` when splitting
+columns, the 40%-of-median narrow-column merge, the ``max_height=600`` cap on
+merging adjacent blocks, and the 0.5 / 0.15 confidence bands.  If ocr_pipeline.py
+moves past that tag, diff those values first — a silent drift here changes
+column segmentation, and therefore the text, for every page.
+
 Pipeline stages (in order):
   1. _filter          – drop regions below confidence threshold
   2. _rescue_low_confidence – re-admit low-conf regions that don't overlap accepted ones
@@ -10,6 +18,8 @@ Pipeline stages (in order):
   4. _fill_column_gaps – add synthetic text regions for large vertical gaps in columns
   5. _reading_order    – sort regions in newspaper column order (top-to-bottom per column)
   6. _merge_adjacent   – merge vertically adjacent same-column text blocks
+  7. _drop_empty_overlaps – drop OCR-label regions the line detector found
+     nothing in (skipped when no line detection ran — see PageLayout.lines_detected)
 """
 
 from __future__ import annotations
@@ -18,6 +28,9 @@ import numpy as np
 from PIL import Image
 
 from newspaper_ocr.models import BBox, PageLayout, Region
+
+#: Revision of dangerouspress-ocr/ocr_pipeline.py this module was ported from.
+PIPELINE_REFERENCE_TAG = "2025-03-07-col-fix"
 
 # Labels treated as "text content" regions.
 _OCR_LABELS = {"text", "paragraph_title", "doc_title", "figure_title"}
@@ -131,7 +144,7 @@ class LayoutProcessor:
         regions = self._fill_column_gaps(regions, layout.width, layout.height)
         regions = self._reading_order(regions)
         regions = self._merge_adjacent(regions, layout.image)
-        regions = self._drop_empty_overlaps(regions)
+        regions = self._drop_empty_overlaps(regions, layout.lines_detected)
         layout.regions = regions
         return layout
 
@@ -280,8 +293,19 @@ class LayoutProcessor:
     # Stage 3b – Drop empty text regions that overlap content regions
     # ------------------------------------------------------------------
 
-    def _drop_empty_overlaps(self, regions: list[Region]) -> list[Region]:
-        """Remove text-labeled regions with no detected lines — nothing to OCR."""
+    def _drop_empty_overlaps(
+        self, regions: list[Region], lines_detected: bool
+    ) -> list[Region]:
+        """Remove text-labeled regions the line detector found nothing in.
+
+        A text region with no lines is a layout false positive — but only if a
+        line detector actually ran.  When it didn't (``skip_lines=True``, or a
+        region-only detector like PP-DocLayout) every region is line-less, and
+        dropping them all would delete the page; those regions are instead left
+        for the region-level OCR fallback in ``Pipeline.run``.
+        """
+        if not lines_detected:
+            return regions
         return [r for r in regions if len(r.lines) > 0 or r.label not in _OCR_LABELS]
 
     # ------------------------------------------------------------------
