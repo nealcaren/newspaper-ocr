@@ -25,6 +25,10 @@ def chunk_spans(
     if height <= chunk_height:
         return [(0, height)]
 
+    # Each step advances by (chunk_height - overlap); clamp overlap so that stays
+    # positive, otherwise y never advances and the loop never terminates.
+    overlap = max(0, min(overlap, chunk_height - 1))
+
     spans: list[tuple[int, int]] = []
     y = 0
     while y < height:

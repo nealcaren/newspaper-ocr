@@ -21,6 +21,15 @@ class TestChunkSpans:
         for (a0, a1), (b0, b1) in zip(spans, spans[1:]):
             assert a1 - b0 == 50
 
+    def test_overlap_not_smaller_than_chunk_height_does_not_hang(self):
+        # overlap >= chunk_height would make y never advance; it must be clamped.
+        spans = chunking.chunk_spans(1000, chunk_height=100, overlap=100)
+        assert spans[0] == (0, 100)
+        assert spans[-1][1] == 1000
+        starts = [s for s, _ in spans]
+        assert starts == sorted(starts)
+        assert len(set(starts)) == len(starts)  # strictly advancing, finite
+
 
 class TestMergeChunkTexts:
     def test_empty(self):

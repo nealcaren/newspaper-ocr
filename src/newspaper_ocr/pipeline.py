@@ -75,6 +75,21 @@ class Pipeline:
         else:
             self.fallback = fallback
 
+        # A region-level primary can only fall back to a region-level recognizer:
+        # the region path re-OCRs whole regions, and the line-level fallback path
+        # never runs for a region primary — so a line fallback would be silently
+        # ignored. Reject it loudly instead.
+        if (
+            self.fallback is not None
+            and isinstance(self.recognizer, RegionRecognizer)
+            and not isinstance(self.fallback, RegionRecognizer)
+        ):
+            raise ValueError(
+                "A region-level recognizer needs a region-level fallback; "
+                f"got fallback={type(self.fallback).__name__}. Use a "
+                "RegionRecognizer such as 'paddleocr-vl'."
+            )
+
         # Threshold is on Tesseract's 0-100 scale; store as-is, compare against
         # line.confidence * 100 at runtime.
         self.fallback_threshold = fallback_threshold
@@ -118,15 +133,16 @@ class Pipeline:
 
         Called when the primary recognizer timed out on a region taller than
         ``chunk_height``. Each band is OCR'd with the same recognizer and the
-        texts are stitched back together. Status becomes ``ok`` if every band
-        was read, ``chunked_partial`` if some band timed out but others produced
-        text, or ``timeout`` if nothing came back.
+        texts are stitched back together. Status becomes ``ok`` only if every
+        band was a clean read, ``chunked_partial`` if any band failed (timed out,
+        errored, or looped) but others produced text, or ``timeout`` if nothing
+        came back.
         """
         width, height = region.image.size
         spans = chunking.chunk_spans(height, self.chunk_height, self.chunk_overlap)
 
         texts: list[str] = []
-        any_timeout = False
+        any_incomplete = False
         for y0, y1 in spans:
             band = Region(
                 bbox=region.bbox,
@@ -134,15 +150,18 @@ class Pipeline:
                 label=region.label,
             )
             band = self.recognizer.recognize(band)
-            if band.status == "timeout":
-                any_timeout = True
-            elif band.text:
+            # Any non-clean band (timeout, error, repetition) means the merged
+            # text may be missing or degraded content -> not a clean "ok".
+            if band.status != "ok":
+                any_incomplete = True
+            # Skip the timeout placeholder; keep real text (incl. truncated).
+            if band.status != "timeout" and band.text:
                 texts.append(band.text)
 
         if not texts:
             return region  # keep the primary's timeout text/status
         region.text = chunking.merge_chunk_texts(texts)
-        region.status = "chunked_partial" if any_timeout else "ok"
+        region.status = "chunked_partial" if any_incomplete else "ok"
         return region
 
     def _apply_region_fallback(self, region: Region) -> Region:

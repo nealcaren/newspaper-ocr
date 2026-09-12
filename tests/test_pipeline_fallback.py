@@ -1,11 +1,12 @@
 """Region-level chunking and do-no-harm fallback in the Pipeline."""
 
+import pytest
 from PIL import Image
 
 from newspaper_ocr.detectors.base import Detector
-from newspaper_ocr.models import BBox, PageLayout, Region
+from newspaper_ocr.models import BBox, Line, PageLayout, Region
 from newspaper_ocr.pipeline import Pipeline
-from newspaper_ocr.recognizers.base import RegionRecognizer
+from newspaper_ocr.recognizers.base import LineRecognizer, RegionRecognizer
 
 
 class _NoopDetector(Detector):
@@ -37,6 +38,25 @@ class _Fixed(RegionRecognizer):
     def recognize(self, region):
         region.text, region.status = self.text, self.status
         return region
+
+
+class _PerCall(RegionRecognizer):
+    """Returns a preset (text, status) for each successive call."""
+
+    def __init__(self, results):
+        self.results = list(results)
+        self.i = 0
+
+    def recognize(self, region):
+        text, status = self.results[self.i]
+        self.i += 1
+        region.text, region.status = text, status
+        return region
+
+
+class _LineRec(LineRecognizer):
+    def recognize(self, line):
+        return line
 
 
 def _pipe(recognizer, fallback=None, **kw):
@@ -84,6 +104,14 @@ class TestChunkRegion:
         assert out.status == "timeout"
         assert out.text == "[OCR timeout]"
 
+    def test_errored_band_is_chunked_partial_not_ok(self):
+        # bands: ok, error (empty -> content lost), ok. Must not report "ok".
+        rec = _PerCall([("top text", "ok"), ("", "error"), ("bottom text", "ok")])
+        pipe = _pipe(rec, chunk_tall_regions=True, chunk_height=500, chunk_overlap=50)
+        out = pipe._chunk_region(_region(1200))
+        assert out.status == "chunked_partial"
+        assert "top text" in out.text and "bottom text" in out.text
+
 
 class TestRegionFallback:
     def test_timeout_replaced_by_any_usable_read(self):
@@ -128,6 +156,10 @@ class TestRegionFallback:
         out = pipe._apply_region_fallback(_region(200, "timeout", "[OCR timeout]"))
         assert out.status == "timeout"
         assert out.text_primary == ""
+
+    def test_line_fallback_for_region_primary_is_rejected(self):
+        with pytest.raises(ValueError, match="region-level fallback"):
+            _pipe(_Fixed("x", "ok"), fallback=_LineRec())
 
 
 class TestAnalyzeIntegration:
