@@ -6,7 +6,12 @@ import pytest
 from PIL import Image
 import numpy as np
 
-from newspaper_ocr.detectors.as_yolo import AsYoloDetector, _letterbox, _xywh2xyxy
+from newspaper_ocr.detectors.as_yolo import (
+    AsYoloDetector,
+    _letterbox,
+    _resolve_model_path,
+    _xywh2xyxy,
+)
 from newspaper_ocr.models import PageLayout
 
 
@@ -14,13 +19,18 @@ from newspaper_ocr.models import PageLayout
 # Model availability check
 # ---------------------------------------------------------------------------
 
-_DROPBOX_DIR = Path(
-    "/Users/nealcaren/Dropbox/american-stories/american_stories_models"
-)
-_MODELS_AVAILABLE = (
-    (_DROPBOX_DIR / "layout_model_new.onnx").is_file()
-    and (_DROPBOX_DIR / "line_model_new.onnx").is_file()
-)
+# Models resolve from the local cache, then the Hugging Face Hub
+# (NealCaren/american-stories-onnx). Skip the model-backed tests only when the
+# layout model can't be obtained at all (e.g. offline with a cold cache).
+def _models_available() -> bool:
+    try:
+        _resolve_model_path(None, "layout_model_new.onnx", None)
+        return True
+    except Exception:
+        return False
+
+
+_MODELS_AVAILABLE = _models_available()
 
 _JP2_PATH = Path(
     "/Volumes/Lightning/chronicling-america/loc_downloads/sn84025908/1856-08-30/seq-4.jp2"
@@ -73,7 +83,8 @@ class TestXywh2xyxy:
 class TestAsYoloDetectorWithModels:
     @pytest.fixture(scope="class")
     def detector(self):
-        return AsYoloDetector(model_dir=_DROPBOX_DIR)
+        # models resolve from cache / the Hugging Face Hub (no local path needed)
+        return AsYoloDetector()
 
     def test_random_noise_image(self, detector):
         """Random noise should not crash; may produce zero or some detections."""

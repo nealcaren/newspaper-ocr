@@ -47,6 +47,9 @@ LAYOUT_TYPES_FOR_LINES: set[str] = {
 }
 
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "newspaper-ocr" / "models"
+#: Public Hugging Face model repo hosting the American Stories ONNX models,
+#: downloaded on demand (and cached by huggingface_hub) when not found locally.
+HF_MODEL_REPO = "NealCaren/american-stories-onnx"
 _DROPBOX_FALLBACK = Path(
     "/Users/nealcaren/Dropbox/american-stories/american_stories_models"
 )
@@ -376,14 +379,22 @@ def _resolve_model_path(
     if p.is_file():
         return p
 
-    # Check Dropbox fallback
+    # Download from the Hugging Face Hub (cached by huggingface_hub thereafter)
+    try:
+        from huggingface_hub import hf_hub_download
+
+        return Path(hf_hub_download(repo_id=HF_MODEL_REPO, filename=filename))
+    except Exception:
+        pass
+
+    # Local Dropbox fallback (maintainer machine only)
     p = _DROPBOX_FALLBACK / filename
     if p.is_file():
         return p
 
     raise FileNotFoundError(
-        f"Could not find {filename}. Searched: "
-        f"{model_dir or '(none)'}, {_DEFAULT_CACHE_DIR}, {_DROPBOX_FALLBACK}"
+        f"Could not find {filename}. Searched: {model_dir or '(none)'}, "
+        f"{_DEFAULT_CACHE_DIR}, hf:{HF_MODEL_REPO}, {_DROPBOX_FALLBACK}"
     )
 
 
