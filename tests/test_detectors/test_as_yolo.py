@@ -7,9 +7,13 @@ from PIL import Image
 import numpy as np
 
 from newspaper_ocr.detectors.as_yolo import (
+    LAYOUT_INPUT_SIZE,
+    LINE_INPUT_SIZE,
     AsYoloDetector,
     _letterbox,
+    _model_input_spec,
     _resolve_model_path,
+    _run_line_detection,
     _xywh2xyxy,
 )
 from newspaper_ocr.models import PageLayout
@@ -147,3 +151,95 @@ class TestAsYoloDetectorWithModels:
                 assert line.image.size[1] > 0
                 assert line.bbox.x0 < line.bbox.x1
                 assert line.bbox.y0 < line.bbox.y1
+
+
+# ---------------------------------------------------------------------------
+# Model input size (no models needed)
+# ---------------------------------------------------------------------------
+
+
+class _FakeInput:
+    def __init__(self, name, shape):
+        self.name = name
+        self.shape = shape
+
+
+class _FakeSession:
+    """Stands in for an InferenceSession, recording what it was fed."""
+
+    def __init__(self, shape, name="images"):
+        self._inputs = [_FakeInput(name, shape)]
+        self.fed = []
+
+    def get_inputs(self):
+        return self._inputs
+
+    def run(self, output_names, input_feed):
+        self.fed.append(next(iter(input_feed.values())).shape)
+        raise _StopInference
+
+
+class _StopInference(Exception):
+    """Raised by the fake session once it has recorded its input."""
+
+
+class TestModelInputSpec:
+    def test_reads_the_size_from_the_model(self):
+        name, size = _model_input_spec(_FakeSession([1, 3, 640, 640]), LAYOUT_INPUT_SIZE)
+        assert (name, size) == ("images", 640)
+
+    def test_layout_and_line_models_have_different_sizes(self):
+        """The published models differ — 1280 and 640 — so this can't be shared."""
+        _, layout = _model_input_spec(_FakeSession([1, 3, 1280, 1280]), LAYOUT_INPUT_SIZE)
+        _, line = _model_input_spec(_FakeSession([1, 3, 640, 640]), LINE_INPUT_SIZE)
+        assert (layout, line) == (1280, 640)
+
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            [1, 3, "height", "width"],  # dynamic axes
+            [1, 3, -1, -1],  # unspecified
+            [1, 3, 640, 800],  # non-square
+        ],
+    )
+    def test_falls_back_when_the_model_does_not_pin_a_square_size(self, shape):
+        _, size = _model_input_spec(_FakeSession(shape), LINE_INPUT_SIZE)
+        assert size == LINE_INPUT_SIZE
+
+    def test_input_name_still_comes_from_the_model(self):
+        name, _ = _model_input_spec(_FakeSession([1, 3, 640, 640], name="input0"), 640)
+        assert name == "input0"
+
+
+class TestLineDetectionInputSize:
+    """Regression: line inference was fed 1280 while the model wanted 640.
+
+    The existing detect() tests never caught it because noise and blank pages
+    produce no article regions, so line inference was never reached.
+    """
+
+    def _crops(self):
+        return [("article", (0, 0, 200, 400), Image.new("RGB", (200, 400), "white"))]
+
+    def test_feeds_the_size_the_model_asked_for(self):
+        session = _FakeSession([1, 3, 640, 640])
+        with pytest.raises(_StopInference):
+            _run_line_detection(session, "images", self._crops(), size=640)
+        assert session.fed[0][-2:] == (640, 640)
+
+    def test_a_different_model_size_is_honoured(self):
+        session = _FakeSession([1, 3, 1280, 1280])
+        with pytest.raises(_StopInference):
+            _run_line_detection(session, "images", self._crops(), size=1280)
+        assert session.fed[0][-2:] == (1280, 1280)
+
+
+@pytest.mark.skipif(not _MODELS_AVAILABLE, reason="ONNX models not found")
+class TestDetectorAdoptsModelSizes:
+    def test_sizes_come_from_the_loaded_models(self):
+        detector = AsYoloDetector()
+        layout_shape = detector._layout_session.get_inputs()[0].shape
+        line_shape = detector._line_session.get_inputs()[0].shape
+
+        assert detector._layout_input_size == layout_shape[-1]
+        assert detector._line_input_size == line_shape[-1]
