@@ -10,3 +10,9 @@ try:
     DETECTORS.register("paddlex", PaddleXDetector)
 except ImportError:
     pass
+
+try:
+    from newspaper_ocr.detectors.doclayout import DocLayoutYoloDetector
+    DETECTORS.register("doclayout_yolo", DocLayoutYoloDetector)
+except ImportError:
+    pass

@@ -40,6 +40,7 @@ pip install "newspaper-ocr[trocr]"       # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"  # LightOnOCR (best accuracy, GPU required)
 pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
+pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector
 
 # EfficientOCR (installed separately from fork):
 pip install git+https://github.com/nealcaren/efficient_ocr.git
@@ -148,6 +149,7 @@ Two detection backends, plus battle-tested newspaper layout post-processing.
 |----------|--------------|-------|----------|
 | `as_yolo` (default) | Regions + lines | ~8s/page | Line-level OCR (Tesseract, EffOCR) |
 | `paddlex` | Regions only (20 categories) | varies | Region-level OCR, detailed layout analysis |
+| `doclayout_yolo` | Regions only (10 categories) | varies | Region-level OCR; DocLayout-YOLO (defaults to the 1280px checkpoint, better on dense broadsheets) |
 
 ### Layout Processing
 
