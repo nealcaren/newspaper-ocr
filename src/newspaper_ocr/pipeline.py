@@ -102,6 +102,11 @@ class Pipeline:
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
 
+        # Stable per-page handles for downstream consumers, in reading order.
+        for i, region in enumerate(layout.regions):
+            if not region.id:
+                region.id = f"r{i}"
+
         # Region-level recognition: recognizer has recognize_region and mode == "region"
         if (
             hasattr(self.recognizer, "recognize_region")

@@ -122,6 +122,12 @@ Ported from the [Dangerous Press](https://dangerouspress.org) production pipelin
 
 Disable with `layout_processing=False`.
 
+The tuned constants (column `gap_thresh`, the narrow-column merge, the merge
+height cap, the confidence bands) are a 1:1 port of a specific revision of the
+production pipeline, pinned as `newspaper_ocr.PIPELINE_REFERENCE_TAG`
+(`2025-03-07-col-fix`). Diff against that tag before changing them — drift here
+changes column segmentation, and therefore the output text, for every page.
+
 ## Phase 2: OCR
 
 Three recognition backends with different speed/accuracy tradeoffs.
@@ -170,6 +176,44 @@ pipe = Pipeline(recognizer="lightonocr")
 
 Requires: `pip install "newspaper-ocr[lightonocr]"`
 
+### GLM-OCR Backend
+
+```python
+pipe = Pipeline(recognizer="glm-ocr")
+```
+
+Runs either against a local MLX/vLLM server (`mode="api"`, the default) or
+directly through transformers on a GPU (`mode="local"`).
+
+```python
+from newspaper_ocr.recognizers.glm_ocr import GlmOcrRecognizer
+
+pipe = Pipeline(
+    recognizer=GlmOcrRecognizer(
+        mode="local",
+        timeout=25,              # per-region wall-clock budget, both modes
+        max_retries=2,
+        repetition_min_len=20,   # loop detector, production defaults
+        repetition_min_reps=5,
+    )
+)
+```
+
+`timeout` is enforced in local mode as well as API mode, so a pathological
+region can't hang a whole batch: generation is guarded by `SIGALRM` where it is
+available, with a between-token deadline as a portable backstop. A region that
+exhausts its retries gets the text `[OCR timeout]` and `status="timeout"` rather
+than silently empty text.
+
+The loop detector slides windows across the whole region text and counts
+occurrences; on a hit the text is cut just after the second occurrence of the
+repeated phrase and the region is marked `status="repetition"`. Defaults match
+the production pipeline (`2025-03-07-col-fix`); lower `repetition_min_reps` to
+catch loops sooner, raise `repetition_min_len` if legitimately repeated short
+phrases are being clipped.
+
+Requires: `pip install "newspaper-ocr[glm-ocr]"`
+
 See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for the training pipeline.
 
 ## Phase 3: Post-Processing
@@ -207,8 +251,28 @@ checker = SpellChecker(dictionary_path="my_newspaper_words.txt")
 | Format | Flag | Content |
 |--------|------|---------|
 | `text` | `--output text` | Plain text, paragraphs separated by blank lines |
-| `json` | `--output json` | Structured: regions, lines, bounding boxes, confidence |
+| `json` | `--output json` | Structured: regions, lines, bounding boxes, confidence, status |
 | `hocr` | `--output hocr` | HTML with spatial coordinates (for text overlay on images) |
+
+### JSON schema
+
+The JSON formatter is the stable contract for downstream passes (review sites,
+article segmentation, LLM enrichment). Each region carries:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable per-page handle, `r0`, `r1`, ... in reading order |
+| `label` | Region class from the detector (`text`, `title`, ...) |
+| `bbox` | `x0`, `y0`, `x1`, `y1` in page pixels |
+| `text` | Recognized text |
+| `status` | `ok`, `timeout`, `repetition`, or `error` |
+| `confidence` | Detection confidence |
+| `lines` | Per-line `text` / `confidence` / `bbox`, when the recognizer is line-level |
+
+`status` is how a caller finds regions worth re-OCRing without re-reading the
+images: `timeout` means the recognizer hit its wall-clock budget (the text is
+the placeholder `[OCR timeout]`), `repetition` means the model looped and the
+text was truncated, and `error` means recognition raised.
 
 ## Architecture
 

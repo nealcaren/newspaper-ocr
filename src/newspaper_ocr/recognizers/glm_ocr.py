@@ -1,11 +1,49 @@
 from __future__ import annotations
 
-import re
+import contextlib
+import signal
+import threading
+import time
 
 from PIL import Image
 
+from newspaper_ocr import repetition
+from newspaper_ocr.errors import OcrTimeout, is_timeout
 from newspaper_ocr.models import Region
 from newspaper_ocr.recognizers.base import RegionRecognizer
+
+#: Placeholder text written when a region exhausts its retries on a timeout.
+#: Matches the production pipeline so downstream reports can grep for it.
+TIMEOUT_TEXT = "[OCR timeout]"
+
+
+@contextlib.contextmanager
+def _wall_clock_alarm(seconds: float):
+    """Raise :class:`OcrTimeout` if the wrapped block runs longer than *seconds*.
+
+    Uses ``SIGALRM``, which interrupts even a single blocking forward pass, but
+    is only available on Unix from the main thread.  Yields True when the alarm
+    is armed so callers know whether they still need a softer backstop.
+    """
+    armed = (
+        seconds
+        and hasattr(signal, "setitimer")
+        and threading.current_thread() is threading.main_thread()
+    )
+    if not armed:
+        yield False
+        return
+
+    def _on_alarm(signum, frame):
+        raise OcrTimeout(f"OCR exceeded {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _on_alarm)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield True
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 class GlmOcrRecognizer(RegionRecognizer):
@@ -14,6 +52,15 @@ class GlmOcrRecognizer(RegionRecognizer):
     Two modes:
     - mode="api": Connect to running MLX/vLLM server (default)
     - mode="local": Load model directly via transformers (GPU required)
+
+    ``timeout`` is a per-region wall-clock budget and applies in both modes: it
+    configures the HTTP client in API mode and guards ``generate()`` in local
+    mode, so a pathological region can't hang a whole batch.  A region that
+    exhausts its retries is left with :data:`TIMEOUT_TEXT` and
+    ``status="timeout"`` rather than silently empty text.
+
+    ``repetition_min_len`` / ``repetition_min_reps`` tune the loop detector; the
+    defaults match the production pipeline (tag ``2025-03-07-col-fix``).
     """
 
     def __init__(
@@ -22,8 +69,10 @@ class GlmOcrRecognizer(RegionRecognizer):
         api_url: str = "http://localhost:8080/v1/chat/completions",
         model_id: str = "zai-org/GLM-OCR",
         mlx_model_id: str = "mlx-community/GLM-OCR-bf16",
-        timeout: int = 25,
+        timeout: float = 25,
         max_retries: int = 2,
+        repetition_min_len: int = repetition.MIN_LEN,
+        repetition_min_reps: int = repetition.MIN_REPS,
     ):
         self.mode = mode
         self.api_url = api_url
@@ -31,6 +80,8 @@ class GlmOcrRecognizer(RegionRecognizer):
         self.mlx_model_id = mlx_model_id
         self.timeout = timeout
         self.max_retries = max_retries
+        self.repetition_min_len = repetition_min_len
+        self.repetition_min_reps = repetition_min_reps
 
         # Lazy-loaded for local mode
         self._model = None
@@ -154,8 +205,18 @@ class GlmOcrRecognizer(RegionRecognizer):
         inputs.pop("token_type_ids", None)
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
 
-        with torch.no_grad():
-            outputs = self._model.generate(**inputs, max_new_tokens=4096)
+        gen_kwargs = {"max_new_tokens": 4096}
+        deadline = time.monotonic() + self.timeout if self.timeout else None
+        if deadline is not None:
+            gen_kwargs["stopping_criteria"] = self._deadline_criteria(deadline)
+
+        with torch.no_grad(), _wall_clock_alarm(self.timeout):
+            outputs = self._model.generate(**inputs, **gen_kwargs)
+
+        # The stopping criteria halts between tokens, so generate() can return
+        # normally after the budget is spent; treat that as a timeout too.
+        if deadline is not None and time.monotonic() >= deadline:
+            raise OcrTimeout(f"OCR exceeded {self.timeout}s")
 
         return self._processor.decode(
             outputs[0][inputs["input_ids"].shape[1] :],
@@ -163,27 +224,26 @@ class GlmOcrRecognizer(RegionRecognizer):
         ).strip()
 
     @staticmethod
-    def _has_repetition(text: str, min_len: int = 10, threshold: int = 3) -> bool:
-        """Detect pathological repetition in OCR output."""
-        if len(text) < min_len * threshold:
-            return False
-        # Check for repeated substrings of various lengths
-        for length in range(min_len, len(text) // threshold + 1):
-            pattern = re.escape(text[:length])
-            matches = len(re.findall(pattern, text))
-            if matches >= threshold:
-                return True
-        return False
+    def _deadline_criteria(deadline: float):
+        """Stop generation once *deadline* passes.
 
-    @staticmethod
-    def _truncate_repetition(text: str, min_len: int = 10) -> str:
-        """Truncate text at the first detected repetition."""
-        for length in range(min_len, len(text) // 2 + 1):
-            candidate = text[:length]
-            rest = text[length:]
-            if rest.startswith(candidate):
-                return candidate.strip()
-        return text.strip()
+        Backstop for platforms where ``SIGALRM`` isn't available (Windows, worker
+        threads).  It only fires between tokens, so it complements rather than
+        replaces the alarm.
+        """
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
+        class _Deadline(StoppingCriteria):
+            def __call__(self, input_ids, scores, **kwargs) -> bool:
+                return time.monotonic() >= deadline
+
+        return StoppingCriteriaList([_Deadline()])
+
+    # Aliases onto the shared implementation in newspaper_ocr.repetition, so
+    # every VLM recognizer detects loops the same way.  Note the thresholds moved
+    # to the production values (20 chars / 5 reps) when the algorithm was aligned.
+    _has_repetition = staticmethod(repetition.has_repetition)
+    _truncate_repetition = staticmethod(repetition.truncate_repetition)
 
     def recognize(self, region: Region) -> Region:
         for attempt in range(self.max_retries + 1):
@@ -192,16 +252,25 @@ class GlmOcrRecognizer(RegionRecognizer):
                     text = self._recognize_api(region.image)
                 else:
                     text = self._recognize_local(region.image)
-
-                if not self._has_repetition(text):
-                    region.text = text
-                    return region
+            except Exception as exc:
                 if attempt < self.max_retries:
                     continue
-                region.text = self._truncate_repetition(text)
+                timed_out = is_timeout(exc)
+                region.text = TIMEOUT_TEXT if timed_out else ""
+                region.status = "timeout" if timed_out else "error"
                 return region
-            except Exception:
-                if attempt == self.max_retries:
-                    region.text = ""
-                    return region
+
+            if not repetition.has_repetition(
+                text, self.repetition_min_len, self.repetition_min_reps
+            ):
+                region.text = text
+                region.status = "ok"
+                return region
+            if attempt < self.max_retries:
+                continue
+            region.text = repetition.truncate_repetition(
+                text, self.repetition_min_len
+            )
+            region.status = "repetition"
+            return region
         return region

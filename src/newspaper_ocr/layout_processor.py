@@ -3,6 +3,14 @@
 Ported from the dangerouspress-ocr production pipeline (ocr_pipeline.py).
 Adapts dict-based logic to use the Region / PageLayout data model.
 
+The port tracks a specific revision of that pipeline, recorded in
+:data:`PIPELINE_REFERENCE_TAG`.  The tuned constants below are the ones that
+must stay in sync with it: ``gap_thresh = median_w * 0.3`` when splitting
+columns, the 40%-of-median narrow-column merge, the ``max_height=600`` cap on
+merging adjacent blocks, and the 0.5 / 0.15 confidence bands.  If ocr_pipeline.py
+moves past that tag, diff those values first — a silent drift here changes
+column segmentation, and therefore the text, for every page.
+
 Pipeline stages (in order):
   1. _filter          – drop regions below confidence threshold
   2. _rescue_low_confidence – re-admit low-conf regions that don't overlap accepted ones
@@ -18,6 +26,9 @@ import numpy as np
 from PIL import Image
 
 from newspaper_ocr.models import BBox, PageLayout, Region
+
+#: Revision of dangerouspress-ocr/ocr_pipeline.py this module was ported from.
+PIPELINE_REFERENCE_TAG = "2025-03-07-col-fix"
 
 # Labels treated as "text content" regions.
 _OCR_LABELS = {"text", "paragraph_title", "doc_title", "figure_title"}

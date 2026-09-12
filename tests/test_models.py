@@ -28,6 +28,22 @@ def test_region_has_confidence():
     assert region.confidence == 0.85
 
 
+def test_region_status_defaults_to_ok():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    region = Region(bbox=BBox(0, 0, 200, 100), image=img, label="article")
+    assert region.status == "ok"
+    assert region.id == ""
+
+
+def test_region_status_is_settable():
+    from newspaper_ocr.models import REGION_STATUSES
+
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    region = Region(bbox=BBox(0, 0, 200, 100), image=img, label="article", status="timeout")
+    assert region.status == "timeout"
+    assert region.status in REGION_STATUSES
+
+
 def test_page_layout_text():
     img = Image.fromarray(np.zeros((500, 400, 3), dtype=np.uint8))
     r1 = Region(bbox=BBox(0, 0, 400, 200), image=img, label="article", lines=[], text="First paragraph.")

@@ -31,14 +31,36 @@ class Line:
     confidence: float = 0.0
 
 
+# Per-region OCR outcomes recorded in Region.status.
+REGION_STATUSES = ("ok", "timeout", "repetition", "error")
+
+
 @dataclass
 class Region:
+    """A detected page region and its recognized text.
+
+    Attributes
+    ----------
+    id : str
+        Stable identifier within the page, assigned by the pipeline as ``r0``,
+        ``r1``, ... in reading order.  Downstream consumers (review sites, LLM
+        enrichment passes) use it to refer back to a region.
+    status : str
+        Outcome of recognition for this region — one of :data:`REGION_STATUSES`.
+        ``"ok"`` is a clean read; ``"timeout"`` means the recognizer exceeded its
+        wall-clock budget; ``"repetition"`` means the model looped and the text
+        was truncated; ``"error"`` means recognition raised.  Anything other than
+        ``"ok"`` marks the region as a candidate for a re-OCR pass.
+    """
+
     bbox: BBox
     image: Image.Image
     label: str
     lines: list[Line] = field(default_factory=list)
     text: str = ""
     confidence: float = 0.0
+    status: str = "ok"
+    id: str = ""
 
 
 @dataclass
