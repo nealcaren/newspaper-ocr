@@ -66,6 +66,21 @@ class TestRepetitionDetection:
         result = GlmOcrRecognizer._truncate_repetition("STRIKE AT THE MILL. " * 12)
         assert result == "STRIKE AT THE MILL. STRIKE AT THE MILL."
 
+    def test_truncation_cut_is_not_window_aligned(self):
+        """The cut must follow the loop, not the nearest min_len boundary.
+
+        Here the looped phrase is 16 chars and starts at offset 14, so every
+        candidate window is off a 20-char grid; scanning only multiples of
+        min_len would start the phrase mid-word and move the cut point.
+        """
+        from newspaper_ocr import repetition
+
+        text = "Opening line. " + "STRIKE AT MILL! " * 10
+        result = repetition.truncate_repetition(text)
+
+        assert result.startswith("Opening line. STRIKE AT MILL! STRIKE AT MILL!")
+        assert result.count("STRIKE AT MILL!") == 2
+
     def test_thresholds_are_configurable(self):
         from newspaper_ocr import repetition
 

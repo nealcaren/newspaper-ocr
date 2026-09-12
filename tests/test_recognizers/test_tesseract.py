@@ -7,7 +7,10 @@ from PIL import Image, ImageDraw
 
 @pytest.fixture
 def has_tesseract():
-    result = subprocess.run(["tesseract", "--version"], capture_output=True)
+    try:
+        result = subprocess.run(["tesseract", "--version"], capture_output=True)
+    except FileNotFoundError:
+        pytest.skip("tesseract not installed")
     if result.returncode != 0:
         pytest.skip("tesseract not installed")
 
@@ -62,13 +65,13 @@ def test_tesseract_batch(has_tesseract):
 
 # --- Mode parameter tests ---
 
-def test_tesseract_default_mode_is_region():
+def test_tesseract_default_mode_is_region(has_tesseract):
     """TesseractRecognizer defaults to region mode."""
     rec = TesseractRecognizer()
     assert rec.mode == "region"
 
 
-def test_tesseract_mode_region():
+def test_tesseract_mode_region(has_tesseract):
     """TesseractRecognizer accepts region mode."""
     rec = TesseractRecognizer(mode="region")
     assert rec.mode == "region"

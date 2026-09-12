@@ -18,6 +18,7 @@ Pipeline stages (in order):
   4. _fill_column_gaps – add synthetic text regions for large vertical gaps in columns
   5. _reading_order    – sort regions in newspaper column order (top-to-bottom per column)
   6. _merge_adjacent   – merge vertically adjacent same-column text blocks
+  7. _drop_empty_overlaps – drop OCR-label regions that have no detected lines
 """
 
 from __future__ import annotations

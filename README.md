@@ -205,6 +205,13 @@ available, with a between-token deadline as a portable backstop. A region that
 exhausts its retries gets the text `[OCR timeout]` and `status="timeout"` rather
 than silently empty text.
 
+One caveat on where you run it: `SIGALRM` can only be armed on the main thread
+of a Unix process, and that is what interrupts a hung call mid-forward-pass. In
+a worker thread (or on Windows) only the between-token deadline applies —
+generation still stops at the budget, but a call that hangs *inside* a single
+forward pass is reported as a timeout only once it returns. Run batches on the
+main thread if you need hangs bounded rather than just detected.
+
 The loop detector slides windows across the whole region text and counts
 occurrences; on a hit the text is cut just after the second occurrence of the
 repeated phrase and the region is marked `status="repetition"`. Defaults match

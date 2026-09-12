@@ -23,7 +23,9 @@ def _wall_clock_alarm(seconds: float):
 
     Uses ``SIGALRM``, which interrupts even a single blocking forward pass, but
     is only available on Unix from the main thread.  Yields True when the alarm
-    is armed so callers know whether they still need a softer backstop.
+    is armed, and False when it could not be — in which case the caller's
+    between-token deadline is the only guard, and a call hung inside a single
+    forward pass will run to completion before being reported as a timeout.
     """
     armed = (
         seconds
@@ -58,6 +60,14 @@ class GlmOcrRecognizer(RegionRecognizer):
     mode, so a pathological region can't hang a whole batch.  A region that
     exhausts its retries is left with :data:`TIMEOUT_TEXT` and
     ``status="timeout"`` rather than silently empty text.
+
+    The strength of that guard depends on where it runs.  On the main thread of
+    a Unix process ``SIGALRM`` interrupts ``generate()`` mid-call, so even a
+    genuinely hung forward pass is cut off at the budget.  Off the main thread
+    (or on Windows) the alarm can't be armed and only the between-token deadline
+    applies: generation still stops early, but a call that hangs *inside* one
+    forward pass is only reported as a timeout once it returns.  Run batches on
+    the main thread if you need hangs bounded rather than merely detected.
 
     ``repetition_min_len`` / ``repetition_min_reps`` tune the loop detector; the
     defaults match the production pipeline (tag ``2025-03-07-col-fix``).

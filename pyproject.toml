@@ -46,7 +46,7 @@ kraken = ["kraken>=5.0", "huggingface-hub>=0.20"]
 trocr = ["transformers>=4.30", "torch"]
 lightonocr = ["transformers>=4.50", "torch"]
 all = ["newspaper-ocr[tesseract,paddlex,glm-ocr,kraken,trocr,lightonocr]"]
-dev = ["pytest>=7.0", "pytest-cov"]
+dev = ["pytest>=7.0", "pytest-cov", "symspellpy"]
 
 [project.scripts]
 newspaper-ocr = "newspaper_ocr.cli:main"
