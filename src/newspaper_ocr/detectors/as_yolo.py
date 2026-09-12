@@ -57,16 +57,33 @@ _DROPBOX_FALLBACK = Path(
 LAYOUT_MODEL_FILENAME = "layout_model_new.onnx"
 LINE_MODEL_FILENAME = "line_model_new.onnx"
 
+#: Fallbacks for models exported with dynamic axes, which don't report a size.
+#: The two models genuinely differ — the published layout model is 1280 and the
+#: line model 640 — so these are per-model, not one shared constant.
+LAYOUT_INPUT_SIZE = 1280
+LINE_INPUT_SIZE = 640
+
 
 # ---------------------------------------------------------------------------
 # YOLO helpers
 # ---------------------------------------------------------------------------
 
 
-def _get_onnx_input_name(model_path: str | Path) -> str:
-    """Return the input tensor name for an ONNX model."""
-    session = ort.InferenceSession(str(model_path))
-    return session.get_inputs()[0].name
+def _model_input_spec(
+    session: ort.InferenceSession, default_size: int
+) -> tuple[str, int]:
+    """Return the input tensor's name and square side length for a model.
+
+    The side length has to come from the model rather than a constant: the
+    published layout model takes 1280x1280 while the line model takes 640x640,
+    and feeding either the other's size is a hard InferenceSession failure.
+    Models exported with dynamic axes report symbolic dimensions instead of
+    integers, so *default_size* covers that case.
+    """
+    spec = session.get_inputs()[0]
+    dims = [d for d in spec.shape[-2:] if isinstance(d, int) and d > 0]
+    size = dims[0] if len(dims) == 2 and dims[0] == dims[1] else default_size
+    return spec.name, size
 
 
 def _letterbox(
@@ -156,12 +173,13 @@ def _run_layout_detection(
     session: ort.InferenceSession,
     input_name: str,
     ca_img: np.ndarray,
+    size: int = LAYOUT_INPUT_SIZE,
 ) -> list[tuple[str, tuple[int, int, int, int], Image.Image]]:
     """Detect layout regions on a full page image (BGR numpy).
 
     Returns list of (class_label, (x0, y0, x1, y1), pil_crop).
     """
-    im = _letterbox(ca_img, (1280, 1280))[0]
+    im = _letterbox(ca_img, (size, size))[0]
     im = im.transpose((2, 0, 1))[::-1]  # HWC->CHW, BGR->RGB
     im = np.expand_dims(np.ascontiguousarray(im), axis=0).astype(np.float32) / 255.0
 
@@ -177,17 +195,18 @@ def _run_layout_detection(
     layout_img = Image.fromarray(cv2.cvtColor(ca_img, cv2.COLOR_BGR2RGB))
     im_width, im_height = layout_img.size
 
-    # Compute rescaling from 1280x1280 letterboxed coords back to original
+    # Compute rescaling from the letterboxed square back to the original
+    side = float(size)
     if im_width > im_height:
-        w_ratio = 1280.0
-        h_ratio = (im_width / im_height) * 1280.0
+        w_ratio = side
+        h_ratio = (im_width / im_height) * side
         w_trans = 0.0
-        h_trans = 1280.0 * ((1 - (im_height / im_width)) / 2)
+        h_trans = side * ((1 - (im_height / im_width)) / 2)
     else:
         h_trans = 0.0
-        h_ratio = 1280.0
-        w_trans = 1280.0 * ((1 - (im_width / im_height)) / 2)
-        w_ratio = 1280.0 * (im_width / im_height)
+        h_ratio = side
+        w_trans = side * ((1 - (im_width / im_height)) / 2)
+        w_ratio = side * (im_width / im_height)
 
     results: list[tuple[str, tuple[int, int, int, int], Image.Image]] = []
     for bbox, pred_class in zip(bboxes, labels):
@@ -267,6 +286,7 @@ def _run_line_detection(
     session: ort.InferenceSession,
     input_name: str,
     layout_crops: list[tuple[str, tuple[int, int, int, int], Image.Image]],
+    size: int = LINE_INPUT_SIZE,
 ) -> list[tuple[int, str, tuple[int, int, int, int], tuple[int, int, int, int], Image.Image]]:
     """Run line detection on text-bearing layout regions.
 
@@ -284,7 +304,7 @@ def _run_line_detection(
         chunk_preds: list[tuple[list[tuple[int, int, int, int]], torch.Tensor, torch.Tensor]] = []
         for chunk in chunks:
             chunk_cv = cv2.cvtColor(np.array(chunk), cv2.COLOR_RGB2BGR)
-            im = _letterbox(chunk_cv, (1280, 1280))[0]
+            im = _letterbox(chunk_cv, (size, size))[0]
             im = im.transpose((2, 0, 1))[::-1]
             im = (
                 np.expand_dims(np.ascontiguousarray(im), axis=0).astype(np.float32)
@@ -303,12 +323,13 @@ def _run_line_detection(
             line_labels = preds[:, -1]
 
             chunk_w, chunk_h = chunk.size
+            side = float(size)
             if chunk_w > chunk_h:
-                h_ratio = (chunk_h / chunk_w) * 1280
-                h_trans = 1280 * ((1 - (chunk_h / chunk_w)) / 2)
+                h_ratio = (chunk_h / chunk_w) * side
+                h_trans = side * ((1 - (chunk_h / chunk_w)) / 2)
             else:
                 h_trans = 0.0
-                h_ratio = 1280.0
+                h_ratio = side
 
             line_proj_crops: list[tuple[int, int, int, int]] = []
             for bbox in line_bboxes:
@@ -429,16 +450,20 @@ class AsYoloDetector(Detector):
         )
 
         logger.info("Loading layout model from %s", layout_path)
-        self._layout_input_name = _get_onnx_input_name(layout_path)
         self._layout_session = ort.InferenceSession(str(layout_path))
+        self._layout_input_name, self._layout_input_size = _model_input_spec(
+            self._layout_session, LAYOUT_INPUT_SIZE
+        )
 
         if not skip_lines:
             line_path = _resolve_model_path(
                 line_model, LINE_MODEL_FILENAME, model_dir_path
             )
             logger.info("Loading line model from %s", line_path)
-            self._line_input_name = _get_onnx_input_name(line_path)
             self._line_session = ort.InferenceSession(str(line_path))
+            self._line_input_name, self._line_input_size = _model_input_spec(
+                self._line_session, LINE_INPUT_SIZE
+            )
 
     def detect(self, image: Image.Image) -> PageLayout:
         """Detect layout regions and text lines in a newspaper page image.
@@ -464,7 +489,10 @@ class AsYoloDetector(Detector):
 
         # Layout detection
         layout_crops = _run_layout_detection(
-            self._layout_session, self._layout_input_name, img_array
+            self._layout_session,
+            self._layout_input_name,
+            img_array,
+            self._layout_input_size,
         )
         logger.info("Detected %d layout regions", len(layout_crops))
 
@@ -472,7 +500,10 @@ class AsYoloDetector(Detector):
         lines_by_region: dict[int, list[tuple[tuple[int, int, int, int], Image.Image]]] = {}
         if not self._skip_lines:
             line_results = _run_line_detection(
-                self._line_session, self._line_input_name, layout_crops
+                self._line_session,
+                self._line_input_name,
+                layout_crops,
+                self._line_input_size,
             )
             logger.info("Detected %d lines", len(line_results))
             for layout_idx, _cls, _layout_bbox, page_bbox, line_crop in line_results:
