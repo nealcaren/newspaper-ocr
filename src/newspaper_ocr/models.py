@@ -34,6 +34,13 @@ class Line:
 # Per-region OCR outcomes recorded in Region.status.
 REGION_STATUSES = ("ok", "timeout", "repetition", "error")
 
+#: Placeholder text written when a region exhausts its retries on a timeout.
+#: Lives here rather than in one recognizer because every consumer that reads
+#: ``Region.text`` needs to tell it apart from recognized text — a repair or
+#: dedup pass that treats it as content will happily "deduplicate" two
+#: unrelated regions that both timed out.
+TIMEOUT_TEXT = "[OCR timeout]"
+
 
 @dataclass
 class Region:
@@ -76,6 +83,13 @@ class PageLayout:
         or line detection skipped for speed).  Defaults to False so a detector
         has to opt in: the cost of not setting it is a false positive surviving,
         while the cost of wrongly setting it is deleting real text.
+    raw_regions : list[Region] | None
+        The regions as recognition left them, before any post-recognition
+        repair (:mod:`newspaper_ocr.region_repair`).  ``None`` until a repair
+        pass runs; from then on it is the untouched layer repair always
+        recomputes *from*, never overwrites.  That is what makes repair
+        idempotent and re-runnable with different thresholds: the raw OCR
+        survives a repair whose logic turns out to be wrong.
     """
 
     image: Image.Image
@@ -83,6 +97,7 @@ class PageLayout:
     width: int = 0
     height: int = 0
     lines_detected: bool = False
+    raw_regions: list[Region] | None = None
 
     @property
     def text(self) -> str:

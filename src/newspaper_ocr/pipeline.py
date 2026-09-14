@@ -22,6 +22,7 @@ class Pipeline:
         fallback: LineRecognizer | RegionRecognizer | str | None = None,
         fallback_threshold: float = 70,
         skip_lines: bool = False,
+        region_repair: bool = False,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -80,6 +81,12 @@ class Pipeline:
         from newspaper_ocr.spell_checker import SpellChecker
         self.spell_checker = SpellChecker(enabled=spell_check)
 
+        # Optional post-recognition region repair (off by default — it spends
+        # extra recognizer calls re-reading crops, and only dense multi-column
+        # pages have the double-detected columns it exists to fix).
+        from newspaper_ocr.region_repair import RegionRepair
+        self.region_repair = RegionRepair(enabled=region_repair)
+
     def _fallback_recognize_line(self, recognizer, line):
         """Use any recognizer (line or region) to re-recognize a single line."""
         if isinstance(recognizer, LineRecognizer):
@@ -97,6 +104,24 @@ class Pipeline:
             line.text = result.text
             line.confidence = 1.0  # VLM fallback is trusted
             return line
+
+    def _recognize_crop(self):
+        """A ``(crop) -> (text, status)`` callback, or None if OCR can't do crops.
+
+        Region repair re-reads pieces of the page that were never detected as
+        regions.  A line recognizer with no ``recognize_region`` cannot read one,
+        and repair is explicitly built to skip its re-OCR passes rather than
+        invent text, so it gets None instead of an adapter that would fail
+        mid-page.
+        """
+        from newspaper_ocr.recognizers.base import recognize_crop
+
+        recognizer = self.recognizer
+        if not hasattr(recognizer, "recognize_region") and not isinstance(
+            recognizer, RegionRecognizer
+        ):
+            return None
+        return lambda crop: recognize_crop(recognizer, crop)
 
     def analyze(self, image: Image.Image) -> PageLayout:
         """Detect, recognize and post-process a page, returning the layout.
@@ -148,6 +173,12 @@ class Pipeline:
                 region.text = " ".join(
                     line.text for line in region.lines if line.text
                 )
+
+        # Post-recognition repair: text-aware dedup, container splitting and
+        # fragment merging.  It runs here, before text cleaning, because the two
+        # re-OCR passes need the recognizer and the page image, and because
+        # cleaning should see the regions a caller will actually get.
+        layout = self.region_repair.repair(layout, self._recognize_crop())
 
         # Text cleaning (dehyphenation, line joining) only for line-level recognizers.
         # Region-level recognizers (GLM-OCR, VLMs) already return clean text.

@@ -9,12 +9,14 @@ from PIL import Image
 
 from newspaper_ocr import repetition
 from newspaper_ocr.errors import OcrTimeout, is_timeout
-from newspaper_ocr.models import Region
+from newspaper_ocr.models import TIMEOUT_TEXT, Region
 from newspaper_ocr.recognizers.base import RegionRecognizer
 
 #: Placeholder text written when a region exhausts its retries on a timeout.
 #: Matches the production pipeline so downstream reports can grep for it.
-TIMEOUT_TEXT = "[OCR timeout]"
+#: Defined in :mod:`newspaper_ocr.models` and re-exported here, where callers
+#: have always imported it from.
+__all__ = ["GlmOcrRecognizer", "TIMEOUT_TEXT"]
 
 
 @contextlib.contextmanager

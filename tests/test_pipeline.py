@@ -206,3 +206,83 @@ def test_fallback_threshold_boundary():
     result = pipe.run(_make_img())
     assert "exact" in result
     assert fallback.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Region repair wiring
+# ---------------------------------------------------------------------------
+
+class ColumnDetector(Detector):
+    """A page detected twice: one tall column plus the paragraphs inside it."""
+
+    def detect(self, image):
+        w, h = image.size
+        return PageLayout(
+            image=image,
+            width=w,
+            height=h,
+            regions=[
+                Region(bbox=BBox(0, 0, w, h), image=image, label="text"),
+                Region(bbox=BBox(0, 0, w, h // 2), image=image, label="text"),
+                Region(bbox=BBox(0, h // 2, w, h), image=image, label="text"),
+            ],
+        )
+
+
+class CountingRegionRecognizer(RegionRecognizer):
+    """Region OCR that reads the same words for every region it is given."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def recognize(self, region):
+        self.calls += 1
+        region.text = "the convention opened on tuesday with every division present"
+        region.status = "ok"
+        return region
+
+
+def test_region_repair_is_off_by_default():
+    pipe = Pipeline(
+        detector=ColumnDetector(),
+        recognizer=CountingRegionRecognizer(),
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+    )
+    layout = pipe.analyze(_make_img())
+    assert len(layout.regions) == 3
+    assert layout.raw_regions is None
+
+
+def test_region_repair_drops_the_duplicate_container():
+    """Enabled, the covered container goes and the paragraph reads stay."""
+    pipe = Pipeline(
+        detector=ColumnDetector(),
+        recognizer=CountingRegionRecognizer(),
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+        region_repair=True,
+    )
+    layout = pipe.analyze(_make_img())
+
+    assert [r.id for r in layout.regions] == ["r1", "r2"]
+    # The raw OCR is still there to recompute from.
+    assert len(layout.raw_regions) == 3
+
+
+def test_region_repair_skips_reocr_for_a_line_only_recognizer():
+    """A line recognizer cannot read a crop, so repair keeps whatever it can't
+    verify rather than failing mid-page."""
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=MockRecognizer(),
+        output=MockFormatter(),
+        layout_processing=False,
+        text_cleaning=False,
+        region_repair=True,
+    )
+    assert pipe._recognize_crop() is None
+    result = pipe.run(_make_img())
+    assert "mock text" in result

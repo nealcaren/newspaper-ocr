@@ -9,13 +9,14 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
            LAYOUT                OCR                  POST-PROCESSING
 
           ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-          │ Detection        │   │ Recognition      │   │ Text Cleaning    │
-Image ──→ │ (AS YOLO or      │──→│ (Tesseract,      │──→│ (dehyphenation,  │──→ Output
-JP2/JPG/  │  PP-DocLayout)   │   │  Kraken, TrOCR,  │   │  line joining)   │    text
+          │ Detection        │   │ Recognition      │   │ Region Repair    │
+Image ──→ │ (AS YOLO or      │──→│ (Tesseract,      │──→│ (text dedup,     │──→ Output
+JP2/JPG/  │  PP-DocLayout)   │   │  Kraken, TrOCR,  │   │  container split)│    text
 PNG       │                  │   │  LightOnOCR,     │   │                  │    json
-          │ Layout Proc.     │   │  GLM-OCR,        │   │ Spell Check      │    hOCR
-          │ (reading order,  │   │  tesserocr,      │   │ (SymSpell)       │
+          │ Layout Proc.     │   │  GLM-OCR,        │   │ Text Cleaning    │    hOCR
+          │ (reading order,  │   │  tesserocr,      │   │ (dehyphenation)  │
           │  dedup, merge)   │   │  EffOCR)         │   │                  │
+          │                  │   │                  │   │ Spell Check      │
           └──────────────────┘   └──────────────────┘   └──────────────────┘
 ```
 
@@ -23,7 +24,7 @@ PNG       │                  │   │  LightOnOCR,     │   │             
 
 **Phase 2 — OCR:** Recognize text in each detected line or region. Swappable backends with different speed/accuracy tradeoffs.
 
-**Phase 3 — Post-Processing:** Reconstruct continuous text from OCR'd lines. Rejoin hyphenated words across line breaks. Join continuation lines into paragraphs. Optional spell correction.
+**Phase 3 — Post-Processing:** Repair regions now that their text is known — drop provable duplicates, split double-detected columns, merge ad fragments. Reconstruct continuous text from OCR'd lines. Rejoin hyphenated words across line breaks. Join continuation lines into paragraphs. Optional spell correction.
 
 ## Installation
 
@@ -275,6 +276,107 @@ See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for
 
 ## Phase 3: Post-Processing
 
+### Region Repair
+
+Layout processing runs before OCR, so it only ever sees geometry. On dense 6–9
+column broadsheets that leaves one defect standing: the detector emits both a
+tall full-column region **and** the paragraph regions inside it. Tall-narrow
+against wide-short, the two boxes are not near-duplicates and neither contains
+the other, so IoU dedup keeps both — and OCR then reads the same passage twice,
+at two different qualities, into the page JSON, full-text search, and every
+article that cites those region ids.
+
+`RegionRepair` runs after recognition, where the text is available to prove what
+is redundant:
+
+```python
+pipe = Pipeline(recognizer="glm-ocr", region_repair=True)
+```
+
+```bash
+newspaper-ocr page.jp2 --backend glm-ocr --region-repair
+```
+
+Off by default: it spends extra recognizer calls re-reading crops, and it is
+dense multi-column pages that need it.
+
+1. **Lossless text dedup** — a region is dropped only when another provably
+   already carries its text: identical text in an overlapping box (the better
+   read stays — higher `status`, then longer text), or text that is a strict
+   substring of an overlapping region's text. Never on fuzzy or token-overlap
+   similarity. A column read and its paragraph reads share most of their tokens
+   while each holds OCR-variants the other lacks, so dropping on similarity
+   deletes text no other region has.
+2. **Container split** — when smaller regions sharing a column cover most of a
+   region's height, that region is a duplicate container read. Dropping it would
+   lose whatever the paragraph reads missed *between* them, so instead the
+   uncovered vertical strips are re-OCR'd as their own regions and the container
+   goes: covered text survives through the cleaner inner reads, uncovered text
+   survives as new strips. Fully covered containers are dropped without a model
+   call. A container whose strip re-OCR fails is kept whole.
+3. **Fragmented-ad merge** — clusters of overlapping fragments of one display ad
+   are unioned and re-OCR'd once, so the ad reads as prose instead of shards.
+   Two guards keep the merge from *creating* duplicate text, and both are
+   load-bearing: a union that would engulf a region outside the cluster is
+   abandoned (re-OCR would copy that neighbour's words into the merge while the
+   neighbour keeps them), as is a union spanning most of the page. Nested pairs
+   — a container and its contents — are never clustered; that is pass 2's job.
+
+New regions carry ids derived from what they came from (`r7` splits into
+`r7s0`, `r7s1`; a merge of `r3` and `r5` becomes `r3m`), so references into a
+page stay readable instead of being renumbered out from under downstream work.
+
+Repair is **non-destructive**. The first call snapshots the recognized regions
+into `PageLayout.raw_regions` and every call recomputes `regions` from that
+snapshot, so it is idempotent, re-runnable with different thresholds, and cannot
+destroy the raw OCR layer:
+
+```python
+from newspaper_ocr.region_repair import RegionRepair
+from newspaper_ocr.recognizers.base import recognize_crop
+
+layout = pipe.analyze(image)
+repair = RegionRepair(container_coverage=0.75)
+repair.repair(layout, lambda crop: recognize_crop(pipe.recognizer, crop))
+print(repair.last_report)   # what changed, per pass
+```
+
+Both re-OCR passes need that callback. Without one — a line-level recognizer
+with no region fallback, say — they are skipped rather than approximated: the
+container stays whole and the fragments stay separate. Stitching together text
+nobody read is the one outcome worse than a duplicate.
+
+Every threshold is a constructor argument; see `RegionRepair`'s docstring for
+what each trades off. The defaults are the ones validated end-to-end on *The
+Negro World* (1921–1933).
+
+### Duplicate Page Scans
+
+Microfilm and vendor PDFs routinely carry the same physical page twice as two
+different scans — a "+2 offset" rescan, a front page shot three times, a whole
+second section reprinted. The crops and contrast differ, so the bytes and the
+md5 differ, and hash-based dedup never sees them. Their text does:
+
+```python
+from newspaper_ocr.region_repair import find_duplicate_pages
+
+pages = [pipe.analyze(image) for image in page_images("issue.pdf")]
+for dup in find_duplicate_pages(pages):
+    print(f"page {dup.index} repeats page {dup.duplicate_of} ({dup.similarity:.2f})")
+```
+
+The decision uses `difflib.SequenceMatcher.ratio()`. Across 60 clean issues,
+true duplicate scans score 0.47–0.96 and distinct newspaper pages 0.06 or below,
+with nothing legitimate in between — hence the 0.35 default threshold; the gap,
+not the exact value, is what makes it safe. `quick_ratio()` is the trap: as a
+frequency-based upper bound it scores *all* newspaper pages 0.7–0.95, because
+any two pages of English prose use the same letters in similar proportions. It
+is used only as a pre-filter to skip comparisons that cannot reach the
+threshold.
+
+Nothing is modified — which copy of a duplicated page to keep is the caller's
+call, and the later scan is often the better one.
+
 ### Text Cleaning
 
 Reconstructs continuous text from OCR'd lines:
@@ -319,7 +421,7 @@ article segmentation, LLM enrichment). Each region carries:
 
 | Field | Meaning |
 |-------|---------|
-| `id` | Stable per-page handle, `r0`, `r1`, ... in reading order |
+| `id` | Stable per-page handle, `r0`, `r1`, ... in reading order (region repair derives `r0s0`, `r0m` for regions it creates) |
 | `label` | Region class from the detector (`text`, `title`, ...) |
 | `bbox` | `x0`, `y0`, `x1`, `y1` in page pixels |
 | `text` | Recognized text |
@@ -331,6 +433,9 @@ article segmentation, LLM enrichment). Each region carries:
 images: `timeout` means the recognizer hit its wall-clock budget (the text is
 the placeholder `[OCR timeout]`), `repetition` means the model looped and the
 text was truncated, and `error` means recognition raised.
+
+`text` is always a string. See [Recognizer return contract](#recognizer-return-contract)
+for why that is worth stating.
 
 ## Review Site
 
@@ -388,6 +493,27 @@ class MyRecognizer(LineRecognizer):
 
 # Plug into pipeline
 pipe = Pipeline(detector=MyDetector(), recognizer=MyRecognizer())
+```
+
+### Recognizer return contract
+
+`RegionRecognizer.recognize(region)` returns the **`Region`** — not a
+`(text, status)` tuple, not a bare string. `region.text` is always a `str`
+(`""` when nothing was recognized) and `region.status` is one of
+`REGION_STATUSES`. Implementations may mutate the region they were given and
+return it, which is what the bundled recognizers do.
+
+The `str` half matters more than it looks: a recognizer that returns
+`(text, status)` and a caller that assigns the whole tuple to `region.text`
+produce JSON with list-typed `"text"`, which breaks every downstream consumer
+that expects a string — quietly, one page at a time. Code that re-OCRs a bare
+crop rather than a detected region should go through `recognize_crop`, which
+normalizes any of those shapes back to `(str, str)`:
+
+```python
+from newspaper_ocr.recognizers.base import recognize_crop
+
+text, status = recognize_crop(pipe.recognizer, page_image.crop(box))
 ```
 
 ## License
