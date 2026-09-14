@@ -132,6 +132,10 @@ class RegionRepair:
                     keep_i = (a.status == "ok", len(a.text or ""), _area(bi)) >= \
                              (b.status == "ok", len(b.text or ""), _area(bj))
                     v = j if keep_i else i
+                    u = i if keep_i else j
+                    if self.lossless and _toks(regions[v].text) - _toks(regions[u].text):
+                        regions[u].text = ((regions[u].text or "") + "\n"
+                                           + (regions[v].text or "")).strip()
                     drop[v] = True
                     self.actions.append(("dup", v))
                     if v == i:
