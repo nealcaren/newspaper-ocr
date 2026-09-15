@@ -41,6 +41,7 @@ pip install "newspaper-ocr[trocr]"       # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"  # LightOnOCR (best accuracy, GPU required)
 pip install "newspaper-ocr[glm-ocr]"     # GLM-OCR vision-language model
 pip install "newspaper-ocr[paddleocr-vl]" # PaddleOCR-VL VLM (good failure-recovery fallback)
+pip install "newspaper-ocr[api]"          # OpenAI/OpenRouter or any OpenAI-compatible endpoint
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector
 
@@ -199,6 +200,7 @@ Recognition backends with different speed/accuracy tradeoffs.
 | `lightonocr` | region | ~500s | **1.1%** | LightOnOCR-2-1B VLM, GPU required |
 | `paddleocr-vl` | region | varies | — | PaddleOCR-VL VLM, GPU recommended; good fallback for regions another model failed on |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
+| `openai` / `openrouter` | region | varies | — | Any OpenAI-compatible endpoint — bring your own hosted model |
 
 *CER measured on pre-1930 newspaper text at R2 (35%) resolution. Times on a single newspaper page (~1,100 lines).
 
@@ -259,6 +261,67 @@ region can't hang a whole batch: generation is guarded by `SIGALRM` where it is
 available, with a between-token deadline as a portable backstop. A region that
 exhausts its retries gets the text `[OCR timeout]` and `status="timeout"` rather
 than silently empty text.
+
+### Bring your own OCR device
+
+The built-in backends run models locally, but hosted models change fast and you
+may want to point the pipeline at your own. There are two ways in — no fork
+required.
+
+**1. Any OpenAI-compatible endpoint (`openai` / `openrouter`).** These region
+recognizers speak the OpenAI vision chat-completions protocol, so the same
+backend works against OpenAI, OpenRouter, Together, Groq, or a local
+vLLM/LM-Studio/Ollama server — you just name a model and point at a `base_url`.
+Nothing is downloaded; the model lives behind the endpoint.
+
+```bash
+# CLI: --model names the hosted model; the key comes from the env var
+export OPENAI_API_KEY=sk-...
+newspaper-ocr page.jp2 --backend openai --model gpt-4o-mini --output text
+
+export OPENROUTER_API_KEY=sk-or-...
+newspaper-ocr page.jp2 --backend openrouter --model "openai/gpt-4o-mini"
+```
+
+```python
+from newspaper_ocr import Pipeline
+from newspaper_ocr.recognizers.openai_compat import OpenAiCompatRecognizer
+
+pipe = Pipeline(
+    recognizer=OpenAiCompatRecognizer(
+        base_url="https://openrouter.ai/api/v1",   # or your own server
+        model="openai/gpt-4o-mini",
+        api_key_env="OPENROUTER_API_KEY",          # key read from the environment
+        prompt="Transcribe all text exactly as it appears.",  # tune per language/document
+        timeout=60,
+        max_retries=2,
+        extra_headers={"X-Title": "newspaper-ocr"},  # e.g. OpenRouter attribution
+    ),
+    output="text",
+)
+```
+
+Requires: `pip install "newspaper-ocr[api]"`. It inherits the same retry,
+timeout, and repetition-loop handling as the other region recognizers.
+
+**2. Plug in any function.** For anything not OpenAI-shaped, pass a callable that
+takes a `PIL.Image` and returns text. The pipeline wraps it as a region
+recognizer (with the same error/timeout/loop handling), so it needs no
+subclassing:
+
+```python
+from newspaper_ocr import Pipeline
+
+def my_ocr(image):
+    # call your own service, model, or API however you like
+    return call_my_service(image)
+
+pipe = Pipeline(recognizer=my_ocr, output="text")
+```
+
+For more control (subclass a recognizer, or register a named backend), see
+`RegionRecognizer`/`LineRecognizer` in `newspaper_ocr.recognizers.base` and the
+`RECOGNIZERS` registry in `newspaper_ocr.recognizers`.
 
 ### Recovering failed regions (splitting + fallback)
 

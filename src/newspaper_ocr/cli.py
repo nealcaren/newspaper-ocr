@@ -8,7 +8,8 @@ import click
 @click.command()
 @click.argument("images", nargs=-1, required=True, type=click.Path(exists=True))
 @click.option("--backend", "-b", default="tesseract",
-              help="Recognition backend: tesseract, tesserocr, effocr")
+              help="Recognition backend: tesseract, tesserocr, effocr, glm-ocr, "
+                   "openai, openrouter (use --model to name the hosted model)")
 @click.option("--detector", "-d", default="as_yolo",
               help="Detection backend: as_yolo, paddlex")
 @click.option("--output", "-o", default="text",

@@ -51,3 +51,16 @@ try:
     RECOGNIZERS.register("paddleocr-vl", PaddleOcrVlRecognizer)
 except ImportError:
     pass
+
+# User-supplied OCR devices via any OpenAI-compatible chat-completions endpoint.
+# Nothing runs locally, so these stay useful as hosted models change: just name a
+# model (--model / recognizer_model=) and set the API-key env var.
+try:
+    from newspaper_ocr.recognizers.openai_compat import (
+        OpenAiCompatRecognizer,
+        OpenRouterRecognizer,
+    )
+    RECOGNIZERS.register("openai", OpenAiCompatRecognizer)
+    RECOGNIZERS.register("openrouter", OpenRouterRecognizer)
+except ImportError:
+    pass

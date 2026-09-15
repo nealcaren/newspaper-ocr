@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from typing import Callable
 from PIL import Image
 from newspaper_ocr import chunking
 from newspaper_ocr.models import Region, PageLayout
@@ -18,7 +19,7 @@ class Pipeline:
     def __init__(
         self,
         detector: Detector | str = "as_yolo",
-        recognizer: LineRecognizer | RegionRecognizer | str = "tesseract",
+        recognizer: LineRecognizer | RegionRecognizer | str | Callable = "tesseract",
         output: Formatter | str = "text",
         recognizer_model: str | Path | None = None,
         model_cache_dir: str | Path | None = None,
@@ -26,7 +27,7 @@ class Pipeline:
         text_cleaning: bool = True,
         spell_check: bool = False,
         device: str = "cpu",
-        fallback: LineRecognizer | RegionRecognizer | str | None = None,
+        fallback: LineRecognizer | RegionRecognizer | str | Callable | None = None,
         fallback_threshold: float = 70,
         skip_lines: bool = False,
         chunk_tall_regions: bool = False,
@@ -59,7 +60,7 @@ class Pipeline:
                     rec_kwargs["model_dir"] = str(recognizer_model)
             self.recognizer = rec_cls(**rec_kwargs)
         else:
-            self.recognizer = recognizer
+            self.recognizer = self._as_recognizer(recognizer)
 
         # Resolve formatter
         if isinstance(output, str):
@@ -72,8 +73,10 @@ class Pipeline:
         if isinstance(fallback, str):
             fb_cls = RECOGNIZERS.get(fallback)
             self.fallback = fb_cls()
+        elif fallback is None:
+            self.fallback = None
         else:
-            self.fallback = fallback
+            self.fallback = self._as_recognizer(fallback)
 
         # A region-level primary can only fall back to a region-level recognizer:
         # the region path re-OCRs whole regions, and the line-level fallback path
@@ -109,6 +112,28 @@ class Pipeline:
         # Optional spell correction (off by default — it's aggressive)
         from newspaper_ocr.spell_checker import SpellChecker
         self.spell_checker = SpellChecker(enabled=spell_check)
+
+    @staticmethod
+    def _as_recognizer(recognizer):
+        """Normalize a user-supplied recognizer into a recognizer object.
+
+        Recognizer instances (or anything duck-typing ``recognize``) pass
+        through untouched. A plain ``fn(image) -> text`` callable is wrapped in
+        :class:`~newspaper_ocr.recognizers.custom.CallableRegionRecognizer` so
+        folks can plug in their own OCR device — e.g. a call to OpenAI or
+        OpenRouter — without subclassing.
+        """
+        if isinstance(recognizer, (LineRecognizer, RegionRecognizer)):
+            return recognizer
+        if hasattr(recognizer, "recognize") or hasattr(recognizer, "recognize_region"):
+            return recognizer
+        if callable(recognizer):
+            from newspaper_ocr.recognizers.custom import CallableRegionRecognizer
+            return CallableRegionRecognizer(recognizer)
+        raise TypeError(
+            "recognizer must be a name, a LineRecognizer/RegionRecognizer, or a "
+            f"callable taking a PIL image and returning text; got {type(recognizer).__name__}"
+        )
 
     def _fallback_recognize_line(self, recognizer, line):
         """Use any recognizer (line or region) to re-recognize a single line."""
