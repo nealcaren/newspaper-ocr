@@ -102,6 +102,15 @@ class TestRecognize:
         assert [p["type"] for p in content] == ["image_url", "text"]
         assert content[0]["image_url"]["url"].startswith("data:image/png;base64,")
 
+    def test_null_content_yields_empty_text(self):
+        # Some providers/models return content: null with a 200 (empty
+        # completion or a filtered response); it must not crash on .strip().
+        r = OpenAiCompatRecognizer(model="m", api_key="sk-test")
+        r._client = _FakeClient(content=None)
+        reg = r.recognize(_region())
+        assert reg.text == ""
+        assert reg.status == "ok"
+
     def test_error_yields_error_status(self):
         r = OpenAiCompatRecognizer(model="m", api_key="sk-test", max_retries=0)
         r._client = _FakeClient(raises=RuntimeError("boom"))

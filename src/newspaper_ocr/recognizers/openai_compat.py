@@ -160,7 +160,10 @@ class OpenAiCompatRecognizer(RegionRecognizer):
             },
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        # Some providers/models return content: null (empty completion) with a
+        # 200; treat that as empty text rather than crashing on .strip().
+        content = resp.json()["choices"][0]["message"].get("content")
+        return (content or "").strip()
 
     def recognize(self, region: Region) -> Region:
         for attempt in range(self.max_retries + 1):
