@@ -19,14 +19,21 @@ def _region():
 
 
 class _FakeResp:
-    def __init__(self, content):
+    def __init__(self, content, status_code=200, text="", usage=None):
         self._content = content
+        self.status_code = status_code
+        self.text = text
+        self._usage = usage
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
 
     def json(self):
-        return {"choices": [{"message": {"content": self._content}}]}
+        body = {"choices": [{"message": {"content": self._content}}]}
+        if self._usage is not None:
+            body["usage"] = self._usage
+        return body
 
 
 class _FakeClient:
@@ -124,6 +131,100 @@ class TestRecognize:
         reg = r.recognize(_region())
         assert reg.text == TIMEOUT_TEXT
         assert reg.status == "timeout"
+
+    def test_token_param_defaults_to_max_tokens(self):
+        r = OpenAiCompatRecognizer(model="m", api_key="sk-test")
+        client = _FakeClient()
+        r._client = client
+        r.recognize(_region())
+        assert "max_tokens" in client.calls[0]["json"]
+        assert r._token_param == "max_tokens"
+
+    def test_token_param_flips_on_400(self):
+        # First POST 400s asking for max_completion_tokens; recognizer flips and
+        # retries, then locks the new field name for subsequent calls.
+        r = OpenAiCompatRecognizer(model="m", api_key="sk-test")
+
+        class FlipClient:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, headers, json):
+                self.calls.append(json)
+                if "max_tokens" in json:
+                    return _FakeResp(
+                        None,
+                        status_code=400,
+                        text="Unsupported parameter: use 'max_completion_tokens'",
+                    )
+                return _FakeResp("ok text")
+
+        client = FlipClient()
+        r._client = client
+        reg = r.recognize(_region())
+        assert reg.text == "ok text"
+        assert reg.status == "ok"
+        assert r._token_param == "max_completion_tokens"
+        # first call max_tokens (400), retry max_completion_tokens (200)
+        assert "max_tokens" in client.calls[0]
+        assert "max_completion_tokens" in client.calls[1]
+        # a second region reuses the locked field — no repeat probe
+        r.recognize(_region())
+        assert "max_completion_tokens" in client.calls[2]
+        assert len(client.calls) == 3
+
+    def test_explicit_token_param_is_not_probed(self):
+        r = OpenAiCompatRecognizer(
+            model="m", api_key="sk-test", token_param="max_completion_tokens"
+        )
+        client = _FakeClient()
+        r._client = client
+        r.recognize(_region())
+        assert "max_completion_tokens" in client.calls[0]["json"]
+
+    def test_usage_is_tracked(self):
+        r = OpenAiCompatRecognizer(model="m", api_key="sk-test")
+        usage = {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "prompt_tokens_details": {"cached_tokens": 40},
+        }
+
+        class UsageClient:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, headers, json):
+                self.calls.append(json)
+                return _FakeResp("hi", usage=usage)
+
+        r._client = UsageClient()
+        r.recognize(_region())
+        r.recognize(_region())
+        assert r.last_usage == usage
+        assert r.usage_totals["requests"] == 2
+        assert r.usage_totals["prompt_tokens"] == 200
+        assert r.usage_totals["completion_tokens"] == 40
+        assert r.usage_totals["cached_prompt_tokens"] == 80
+
+    def test_cost_uses_prices_and_cached_rate(self):
+        r = OpenAiCompatRecognizer(model="m", api_key="sk-test")
+        r.usage_totals = {
+            "requests": 1,
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+            "total_tokens": 2_000_000,
+            "cached_prompt_tokens": 0,
+        }
+        # 1M input @ $0.20 + 1M output @ $1.20 = $1.40
+        assert r.cost(0.20, 1.20) == pytest.approx(1.40)
+
+        # with caching: 200k of the input tokens cached at $0.02
+        r.usage_totals["prompt_tokens"] = 1_000_000
+        r.usage_totals["cached_prompt_tokens"] = 200_000
+        # 800k @ 0.20 + 200k @ 0.02 + 1M @ 1.20 = 0.16 + 0.004 + 1.20
+        assert r.cost(0.20, 1.20, cached_input_per_mtok=0.02) == pytest.approx(1.364)
 
     def test_retries_then_succeeds(self):
         r = OpenAiCompatRecognizer(model="m", api_key="sk-test", max_retries=2)

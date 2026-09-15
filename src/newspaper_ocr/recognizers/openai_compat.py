@@ -78,11 +78,26 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         Extra attempts after the first on error, timeout, or a looping response.
     max_tokens:
         Upper bound on generated tokens per region.
+    token_param:
+        Name of the token-limit request field. Left as ``None`` (the default) it
+        auto-detects: it sends ``max_tokens`` and, if the endpoint rejects that
+        with a 400 asking for ``max_completion_tokens`` (o1 / gpt-5 family),
+        flips once and remembers the choice. Pass an explicit name to pin it and
+        skip the probe.
     extra_headers:
         Additional HTTP headers merged into every request — handy for
         OpenRouter's optional ``HTTP-Referer`` / ``X-Title`` attribution.
     repetition_min_len / repetition_min_reps:
         Loop-detector thresholds, shared with the other VLM backends.
+
+    Attributes
+    ----------
+    last_usage:
+        The ``usage`` block from the most recent response, or ``None``.
+    usage_totals:
+        Running token/request totals across this instance. Pair with
+        :meth:`cost` and the model's published per-1M-token prices to estimate
+        spend — e.g. ``rec.cost(0.20, 1.20)`` for a model at $0.20/$1.20.
     """
 
     def __init__(
@@ -95,6 +110,7 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         timeout: float = 60,
         max_retries: int = 2,
         max_tokens: int = 4096,
+        token_param: str | None = None,
         extra_headers: dict[str, str] | None = None,
         repetition_min_len: int = repetition.MIN_LEN,
         repetition_min_reps: int = repetition.MIN_REPS,
@@ -118,9 +134,28 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         self.timeout = timeout
         self.max_retries = max_retries
         self.max_tokens = max_tokens
+        # Name of the token-limit field. Newer OpenAI models (o1, gpt-5 family)
+        # reject "max_tokens" and require "max_completion_tokens"; older models
+        # and many third-party endpoints only accept "max_tokens". Default to
+        # "max_tokens" and auto-switch on the first 400 that asks for the other.
+        self._token_param = token_param or "max_tokens"
+        self._token_param_locked = token_param is not None
         self.extra_headers = dict(extra_headers or {})
         self.repetition_min_len = repetition_min_len
         self.repetition_min_reps = repetition_min_reps
+
+        #: The ``usage`` block from the most recent response (or ``None``).
+        self.last_usage: dict | None = None
+        #: Running totals across every billed response this instance made.
+        #: ``requests`` counts responses that reported usage; the token fields
+        #: sum the corresponding ``usage`` values.
+        self.usage_totals: dict[str, int] = {
+            "requests": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_prompt_tokens": 0,
+        }
 
         self._client = httpx.Client(timeout=timeout)
 
@@ -137,33 +172,92 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         image.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode()
 
-        resp = self._client.post(
-            self.endpoint,
-            headers=self._headers(),
-            json={
-                "model": self.model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{b64}"
+        def _post():
+            return self._client.post(
+                self.endpoint,
+                headers=self._headers(),
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/png;base64,{b64}"
+                                    },
                                 },
-                            },
-                            {"type": "text", "text": self.prompt},
-                        ],
-                    }
-                ],
-                "max_tokens": self.max_tokens,
-            },
-        )
+                                {"type": "text", "text": self.prompt},
+                            ],
+                        }
+                    ],
+                    self._token_param: self.max_tokens,
+                },
+            )
+
+        resp = _post()
+        # Newer OpenAI models reject "max_tokens" and want "max_completion_tokens"
+        # (and vice-versa for some endpoints). On that specific 400, flip the
+        # field name once, remember it, and retry — so the switch costs one round
+        # trip on the first call and nothing thereafter.
+        if (
+            resp.status_code == 400
+            and not self._token_param_locked
+            and "max_completion_tokens" in resp.text
+        ):
+            self._token_param = (
+                "max_completion_tokens"
+                if self._token_param == "max_tokens"
+                else "max_tokens"
+            )
+            self._token_param_locked = True
+            resp = _post()
+
         resp.raise_for_status()
+        data = resp.json()
+        self._record_usage(data.get("usage"))
         # Some providers/models return content: null (empty completion) with a
         # 200; treat that as empty text rather than crashing on .strip().
-        content = resp.json()["choices"][0]["message"].get("content")
+        content = data["choices"][0]["message"].get("content")
         return (content or "").strip()
+
+    def _record_usage(self, usage: dict | None) -> None:
+        """Accumulate the ``usage`` block from a response, if present.
+
+        Providers vary in what they report; missing fields are treated as zero
+        and unknown extras are ignored. ``cached_prompt_tokens`` is read from the
+        nested ``prompt_tokens_details.cached_tokens`` that OpenAI-style
+        responses use.
+        """
+        if not usage:
+            return
+        self.last_usage = usage
+        self.usage_totals["requests"] += 1
+        self.usage_totals["prompt_tokens"] += usage.get("prompt_tokens", 0) or 0
+        self.usage_totals["completion_tokens"] += usage.get("completion_tokens", 0) or 0
+        self.usage_totals["total_tokens"] += usage.get("total_tokens", 0) or 0
+        details = usage.get("prompt_tokens_details") or {}
+        self.usage_totals["cached_prompt_tokens"] += details.get("cached_tokens", 0) or 0
+
+    def cost(self, input_per_mtok: float, output_per_mtok: float,
+             cached_input_per_mtok: float | None = None) -> float:
+        """Estimate spend so far from :attr:`usage_totals` and per-1M-token prices.
+
+        Cached prompt tokens are billed at ``cached_input_per_mtok`` when given
+        (they are otherwise counted at the full input rate). Prices are the
+        published per-1M-token figures for the model.
+        """
+        totals = self.usage_totals
+        cached = totals["cached_prompt_tokens"]
+        uncached_in = totals["prompt_tokens"] - cached
+        rate_in = uncached_in / 1_000_000 * input_per_mtok
+        rate_cached = (
+            cached / 1_000_000
+            * (cached_input_per_mtok if cached_input_per_mtok is not None else input_per_mtok)
+        )
+        rate_out = totals["completion_tokens"] / 1_000_000 * output_per_mtok
+        return rate_in + rate_cached + rate_out
 
     def recognize(self, region: Region) -> Region:
         for attempt in range(self.max_retries + 1):

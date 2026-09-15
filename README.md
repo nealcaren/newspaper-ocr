@@ -302,7 +302,21 @@ pipe = Pipeline(
 ```
 
 Requires: `pip install "newspaper-ocr[api]"`. It inherits the same retry,
-timeout, and repetition-loop handling as the other region recognizers.
+timeout, and repetition-loop handling as the other region recognizers. The
+token-limit field is auto-detected — it sends `max_tokens` and transparently
+switches to `max_completion_tokens` for models that require it (o1 / gpt-5
+family).
+
+Token usage is tracked per instance so you can price a run. `rec.last_usage`
+holds the most recent response's `usage`, `rec.usage_totals` accumulates across
+the run, and `rec.cost(input_per_mtok, output_per_mtok)` estimates spend:
+
+```python
+rec = OpenAiCompatRecognizer(model="gpt-5.6-luna")
+Pipeline(recognizer=rec).analyze(page)   # RGB image
+print(rec.usage_totals)                  # {'requests': 23, 'prompt_tokens': 51502, ...}
+print(rec.cost(0.20, 1.20))              # ~$0.02 for a full page at that model's price
+```
 
 **2. Plug in any function.** For anything not OpenAI-shaped, pass a callable that
 takes a `PIL.Image` and returns text. The pipeline wraps it as a region
