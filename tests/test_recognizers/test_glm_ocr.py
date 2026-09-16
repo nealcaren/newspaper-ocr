@@ -13,6 +13,18 @@ class TestGlmOcrImport:
     def test_class_exists_and_is_region_recognizer(self):
         assert issubclass(GlmOcrRecognizer, RegionRecognizer)
 
+    def test_strip_markdown_fences(self):
+        strip = GlmOcrRecognizer._strip_markdown_fences
+        # fenced transcription -> fences removed, content kept
+        assert strip("```markdown\nHello world\nsecond line\n```") == \
+            "Hello world\nsecond line"
+        # indented / bare fences both go
+        assert strip("  ```\ntext\n  ```") == "text"
+        # no fence -> untouched
+        assert strip("plain text\nno fence") == "plain text\nno fence"
+        # a line that merely contains backticks mid-text is preserved
+        assert strip("use ``code`` here") == "use ``code`` here"
+
     def test_import_error_local_mode(self):
         with patch.dict("sys.modules", {"transformers": None}):
             with pytest.raises(ImportError, match="transformers"):
