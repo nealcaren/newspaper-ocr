@@ -242,14 +242,38 @@ class Pipeline:
             region.engine = type(self.fallback).__name__
         return region
 
-    def analyze(self, image: Image.Image) -> PageLayout:
+    @staticmethod
+    def _load_image(image: Image.Image | str | Path) -> Image.Image:
+        """Normalize an input into an RGB :class:`PIL.Image.Image`.
+
+        Accepts an open image or a path (loaded from disk), and converts any
+        non-RGB mode — grayscale scans are common — so detectors and recognizers
+        get a consistent 3-channel image. Anything else raises a clear
+        ``TypeError`` instead of failing cryptically deep in a detector.
+        """
+        if isinstance(image, (str, Path)):
+            image = Image.open(str(image))
+        if not isinstance(image, Image.Image):
+            raise TypeError(
+                "expected a PIL Image or a path to one, got "
+                f"{type(image).__name__}"
+            )
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        return image
+
+    def analyze(self, image: Image.Image | str | Path) -> PageLayout:
         """Detect, recognize and post-process a page, returning the layout.
 
         This is :meth:`run` without the formatting step, for callers that need
         the regions themselves — a review site, an article-segmentation pass, or
         anything that wants to emit more than one representation of a page
         without OCRing it twice.
+
+        ``image`` may be an open :class:`PIL.Image.Image` or a path; non-RGB
+        inputs (e.g. grayscale scans) are converted automatically.
         """
+        image = self._load_image(image)
         layout = self.detector.detect(image)
         layout = self.layout_processor.process(layout)
 
@@ -313,13 +337,12 @@ class Pipeline:
         layout = self.spell_checker.check(layout)
         return layout
 
-    def run(self, image: Image.Image) -> str:
+    def run(self, image: Image.Image | str | Path) -> str:
         """Analyze a page and render it with the configured formatter."""
         return self.formatter.format(self.analyze(image))
 
     def ocr(self, path: str | Path, output: str | None = None) -> str:
-        image = Image.open(str(path)).convert("RGB")
-        return self.run(image)
+        return self.run(path)
 
     def ocr_batch(self, paths: list[str | Path]) -> list[str]:
         return [self.ocr(p) for p in paths]

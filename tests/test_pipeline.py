@@ -40,6 +40,42 @@ def test_pipeline_end_to_end():
     assert "mock text" in result
 
 
+def test_load_image_accepts_path(tmp_path):
+    p = tmp_path / "page.png"
+    Image.fromarray(np.zeros((20, 30, 3), dtype=np.uint8)).save(str(p))
+    for arg in (str(p), p):
+        img = Pipeline._load_image(arg)
+        assert isinstance(img, Image.Image)
+        assert img.mode == "RGB"
+
+
+def test_load_image_converts_grayscale():
+    gray = Image.new("L", (30, 20))
+    assert Pipeline._load_image(gray).mode == "RGB"
+
+
+def test_load_image_rejects_non_image():
+    import pytest
+
+    with pytest.raises(TypeError):
+        Pipeline._load_image(42)
+
+
+def test_analyze_accepts_grayscale_and_path(tmp_path):
+    # A grayscale page must not crash the detector path (regression: passing a
+    # non-RGB image or a path used to fail deep inside detect()).
+    p = tmp_path / "gray.png"
+    Image.new("L", (200, 100)).save(str(p))
+    pipe = Pipeline(
+        detector=MockDetector(),
+        recognizer=MockRecognizer(),
+        output=MockFormatter(),
+        layout_processing=False,
+    )
+    assert "mock text" in pipe.run(str(p))
+    assert "mock text" in pipe.run(Image.new("L", (200, 100)))
+
+
 def test_pipeline_ocr_from_path(tmp_path):
     img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
     img_path = tmp_path / "test.png"
