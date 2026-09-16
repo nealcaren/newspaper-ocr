@@ -409,6 +409,49 @@ Requires: `pip install "newspaper-ocr[glm-ocr]"`
 
 See [dangerouspress-ocr-finetune](https://github.com/nealcaren/ocr-finetune) for the training pipeline.
 
+### Residual second pass (recover detector misses)
+
+The recovery ladder above fixes regions the recognizer *failed on*. `ResidualOcr`
+fixes a different error: text the **detector never boxed at all** — whole
+mastheads, side columns, or inter-block strips the recognizer therefore never
+sees. Once a strong recognizer saturates precision, this undetected text is the
+dominant remaining error (recall).
+
+It runs after recognition and is **non-destructive** (returns a new
+`PageLayout`), so it's invoked around `analyze` rather than as a `Pipeline` flag:
+
+```python
+from newspaper_ocr import Pipeline
+from newspaper_ocr.residual_ocr import ResidualOcr
+
+pipe = Pipeline(recognizer="glm-ocr")
+residual = ResidualOcr(recognizer=pipe.recognizer)
+
+layout = pipe.analyze("page.jpg")     # detect + recognize
+layout = residual.recover(layout)     # recover detector-missed text
+text = pipe.formatter.format(layout)
+```
+
+How it works: mask every pass-1 region box, find the leftover ink, cut it into
+column-shaped blocks (a recursive XY-cut on the ink projections, with a valley
+split for multi-column blobs), re-OCR each block, and merge the results back in
+reading order. Because covered ink is erased before detection, recovered crops
+can't duplicate captured text, so precision is preserved with no dedup. A block's
+geometry thresholds derive from the page's own column width, so it adapts across
+DPIs and column counts.
+
+- **Gated / do-no-harm** — skips a page unless a meaningful fraction of its ink
+  (default 10%) lies outside every detected box, so already-covered pages are a
+  no-op.
+- Recovered regions carry `engine="residual"` for auditing.
+- Works with region recognizers and line recognizers that expose
+  `recognize_region` (e.g. Tesseract).
+
+On [NewsBench](https://github.com/nealcaren/newsbench) (PP-DocLayout + GLM-OCR),
+over pages with complete gold it lifts mean bowF1 0.961 → 0.980 and CER 0.919 →
+0.937; on the worst-recall pages the detector under-read, bowF1 gains reach +0.13
+(recall 0.74 → 0.97) with precision intact.
+
 ## Phase 3: Post-Processing
 
 ### Text Cleaning
