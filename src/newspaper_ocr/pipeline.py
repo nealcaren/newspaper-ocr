@@ -138,23 +138,33 @@ class Pipeline:
     def _resolve_detector_name(detector: str) -> str:
         """Map the ``"auto"`` detector to the best available concrete detector.
 
-        PaddleX (PP-DocLayout) is markedly better than ``as_yolo`` on dense,
-        multi-column newspaper pages, so ``"auto"`` (the default) prefers it when
-        installed and falls back to ``as_yolo`` otherwise — with a warning, since
-        ``as_yolo`` underperforms on broadsheets. Any explicit name is returned
-        unchanged (and resolves normally, erroring if unavailable).
+        Preference order, best first: **DocLayout-YOLO**, then PaddleX
+        (PP-DocLayout), then ``as_yolo``.  On NewsBench (dense, multi-column
+        newspaper pages) DocLayout-YOLO + GLM-OCR leads PaddleX + GLM-OCR
+        (0.970 vs 0.937 overall) — it proposes finer, more complete regions and
+        needs no residual recovery — so ``"auto"`` prefers it when the
+        ``doclayout-yolo`` package is installed, falls back to PaddleX when only
+        that is present, and to ``as_yolo`` otherwise (with a warning, since it
+        underperforms on broadsheets).  Any explicit name is returned unchanged
+        (and resolves normally, erroring if unavailable).
+
+        Install the preferred detector with ``newspaper-ocr[doclayout]`` (or
+        ``[paddlex]``).
         """
         if detector != "auto":
             return detector
         import importlib.util
 
+        if importlib.util.find_spec("doclayout_yolo") is not None:
+            return "doclayout_yolo"
         if importlib.util.find_spec("paddlex") is not None:
             return "paddlex"
         import warnings
 
         warnings.warn(
-            "PaddleX is not installed, so the 'auto' detector is falling back to "
-            "'as_yolo', which underperforms on dense newspaper pages. Install "
+            "Neither DocLayout-YOLO nor PaddleX is installed, so the 'auto' "
+            "detector is falling back to 'as_yolo', which underperforms on dense "
+            "newspaper pages. Install newspaper-ocr[doclayout] (best) or "
             "newspaper-ocr[paddlex] for substantially better layout detection.",
             stacklevel=3,
         )
