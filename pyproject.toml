@@ -50,7 +50,7 @@ paddleocr-vl = ["transformers>=5.3", "torch"]
 api = ["httpx>=0.24"]
 pdf = ["pymupdf>=1.24"]
 all = ["newspaper-ocr[tesseract,paddlex,doclayout,glm-ocr,kraken,trocr,lightonocr,paddleocr-vl,api,pdf]"]
-dev = ["pytest>=7.0", "pytest-cov", "symspellpy", "pymupdf>=1.24"]
+dev = ["pytest>=7.0", "pytest-cov", "symspellpy", "pymupdf>=1.24", "rapidfuzz>=3.0"]
 
 [project.scripts]
 newspaper-ocr = "newspaper_ocr.cli:main"
