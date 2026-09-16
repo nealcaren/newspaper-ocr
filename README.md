@@ -418,18 +418,31 @@ sees. Once a strong recognizer saturates precision, this undetected text is the
 dominant remaining error (recall).
 
 It runs after recognition and is **non-destructive** (returns a new
-`PageLayout`), so it's invoked around `analyze` rather than as a `Pipeline` flag:
+`PageLayout`). As of 0.7.0 it is **on by default for region-level recognizers**
+(GLM-OCR and other VLMs), where it is validated and do-no-harm gated; it stays off
+for line recognizers such as Tesseract. Control it with `residual_ocr`:
 
 ```python
 from newspaper_ocr import Pipeline
+
+Pipeline(recognizer="glm-ocr")                       # residual ON (auto: region recognizer)
+Pipeline(recognizer="glm-ocr", residual_ocr=False)   # opt out
+Pipeline(recognizer="tesseract")                     # residual OFF (auto: line recognizer)
+Pipeline(recognizer="tesseract", residual_ocr=True)  # force on (uses recognize_region)
+```
+
+`residual_ocr` accepts `"auto"` (default — on for region recognizers), `True`
+(force on for any region-capable recognizer), or `False`. On the CLI, region
+recognizers get it automatically; pass `--no-residual` to opt out.
+
+To run it by hand (e.g. after a custom `analyze`), it's also a standalone pass:
+
+```python
 from newspaper_ocr.residual_ocr import ResidualOcr
 
-pipe = Pipeline(recognizer="glm-ocr")
+pipe = Pipeline(recognizer="glm-ocr", residual_ocr=False)  # disable the built-in
 residual = ResidualOcr(recognizer=pipe.recognizer)
-
-layout = pipe.analyze("page.jpg")     # detect + recognize
-layout = residual.recover(layout)     # recover detector-missed text
-text = pipe.formatter.format(layout)
+layout = residual.recover(pipe.analyze("page.jpg"))
 ```
 
 How it works: mask every pass-1 region box, find the leftover ink, cut it into
