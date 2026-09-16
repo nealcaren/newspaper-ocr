@@ -33,6 +33,7 @@ class Pipeline:
         chunk_tall_regions: bool = False,
         chunk_height: int = chunking.CHUNK_HEIGHT,
         chunk_overlap: int = chunking.CHUNK_OVERLAP,
+        residual_ocr: bool | str = "auto",
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -113,6 +114,25 @@ class Pipeline:
         # Optional spell correction (off by default — it's aggressive)
         from newspaper_ocr.spell_checker import SpellChecker
         self.spell_checker = SpellChecker(enabled=spell_check)
+
+        # Residual second-pass recovery (mask detected boxes -> re-OCR leftover
+        # ink). "auto" (default) enables it for region-level recognizers, where
+        # it's validated and do-no-harm-gated; it stays off for line recognizers
+        # (e.g. Tesseract). True forces it on for any region-capable recognizer;
+        # False disables it. See newspaper_ocr.residual_ocr.ResidualOcr.
+        self.residual = None
+        if residual_ocr:
+            is_region = isinstance(self.recognizer, RegionRecognizer)
+            enable = is_region if residual_ocr == "auto" else True
+            if enable:
+                if not (is_region or hasattr(self.recognizer, "recognize_region")):
+                    raise ValueError(
+                        "residual_ocr needs a region-capable recognizer (a "
+                        "RegionRecognizer, or a line recognizer exposing "
+                        f"recognize_region); got {type(self.recognizer).__name__}."
+                    )
+                from newspaper_ocr.residual_ocr import ResidualOcr
+                self.residual = ResidualOcr(recognizer=self.recognizer)
 
     @staticmethod
     def _resolve_detector_name(detector: str) -> str:
@@ -328,6 +348,13 @@ class Pipeline:
                 region.text = " ".join(
                     line.text for line in region.lines if line.text
                 )
+
+        # Residual second pass: recover text the detector never boxed (whole
+        # columns/mastheads), then re-sort into reading order. Runs after the
+        # recovery ladder so it works on the final pass-1 regions; gated to a
+        # no-op when little ink is uncovered.
+        if self.residual is not None:
+            layout = self.residual.recover(layout)
 
         # Text cleaning (dehyphenation, line joining) only for line-level recognizers.
         # Region-level recognizers (GLM-OCR, VLMs) already return clean text.

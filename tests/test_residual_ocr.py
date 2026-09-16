@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from newspaper_ocr.models import BBox, PageLayout, Region
+from newspaper_ocr.recognizers.base import RegionRecognizer
 from newspaper_ocr.residual_ocr import ResidualOcr
 
 
@@ -164,6 +165,45 @@ def test_uses_recognize_region_when_available():
     recovered = [r for r in out.regions if r.engine == "residual"]
     assert rec.region_calls >= 1
     assert recovered and recovered[0].text == "LINE_ENGINE"
+
+
+class _RegionRec(RegionRecognizer):
+    mode = "region"
+
+    def recognize(self, region):
+        region.text = "x"
+        return region
+
+
+def test_pipeline_auto_enables_residual_for_region_recognizer():
+    from newspaper_ocr import Pipeline
+    pipe = Pipeline(detector=_StubDetector(), recognizer=_RegionRec(), output="text")
+    assert pipe.residual is not None
+
+
+def test_pipeline_auto_skips_residual_for_line_recognizer():
+    from newspaper_ocr import Pipeline
+    from newspaper_ocr.recognizers.base import LineRecognizer
+
+    class LineRec(LineRecognizer):
+        def recognize(self, line):
+            return line
+
+    pipe = Pipeline(detector=_StubDetector(), recognizer=LineRec(), output="text")
+    assert pipe.residual is None
+
+
+def test_pipeline_residual_ocr_false_disables():
+    from newspaper_ocr import Pipeline
+    pipe = Pipeline(detector=_StubDetector(), recognizer=_RegionRec(),
+                    output="text", residual_ocr=False)
+    assert pipe.residual is None
+
+
+class _StubDetector:
+    def detect(self, image):
+        return PageLayout(image=image, regions=[], width=image.width,
+                          height=image.height)
 
 
 def test_converges_within_max_passes():
