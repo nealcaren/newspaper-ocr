@@ -79,7 +79,7 @@ class GlmOcrRecognizer(RegionRecognizer):
         api_url: str = "http://localhost:8080/v1/chat/completions",
         model_id: str = "zai-org/GLM-OCR",
         mlx_model_id: str = "mlx-community/GLM-OCR-bf16",
-        timeout: float = 25,
+        timeout: float = 120,
         max_retries: int = 2,
         repetition_min_len: int = repetition.MIN_LEN,
         repetition_min_reps: int = repetition.MIN_REPS,
@@ -172,10 +172,17 @@ class GlmOcrRecognizer(RegionRecognizer):
         self._processor = AutoProcessor.from_pretrained(self.model_id)
         # MPS has known issues with GLM-OCR vision position ids;
         # use CUDA when available, otherwise fall back to CPU.
+        #
+        # Load onto the device with an explicit ``.to(...)`` rather than
+        # ``device_map="auto"``: the latter needs the optional ``accelerate``
+        # package, and without it ``from_pretrained`` raises — which the per-region
+        # try/except in :meth:`recognize` swallows into ``status="error"`` with
+        # empty text, so every region silently comes back blank. These models are
+        # small (single-GPU), so a plain ``.to("cuda")`` is correct and dependency-free.
         if torch.cuda.is_available():
             self._model = AutoModelForImageTextToText.from_pretrained(
-                self.model_id, dtype=torch.bfloat16, device_map="auto"
-            )
+                self.model_id, dtype=torch.bfloat16
+            ).to("cuda")
         else:
             self._model = AutoModelForImageTextToText.from_pretrained(
                 self.model_id, dtype=torch.float32

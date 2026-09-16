@@ -38,7 +38,7 @@ class PaddleOcrVlRecognizer(RegionRecognizer):
         model_id: str = "PaddlePaddle/PaddleOCR-VL-1.6",
         prompt: str = "OCR:",
         device: str | None = None,
-        timeout: float = 40,
+        timeout: float = 120,
         max_new_tokens: int = 1024,
         max_retries: int = 1,
         repetition_min_len: int = repetition.MIN_LEN,
@@ -78,12 +78,19 @@ class PaddleOcrVlRecognizer(RegionRecognizer):
                 "Note: native PaddleOCR-VL support requires transformers>=5.3"
             )
 
+        import torch
+
         self._processor = AutoProcessor.from_pretrained(self.model_id)
-        # dtype="auto" + device_map="auto" places the model on GPU when present
-        # and picks the checkpoint's native dtype; no trust_remote_code (see docstring).
+        # Load with dtype="auto" (checkpoint's native dtype), then place with an
+        # explicit ``.to(...)`` rather than ``device_map="auto"``. device_map needs
+        # the optional ``accelerate`` package; without it ``from_pretrained`` raises,
+        # and the per-region try/except in :meth:`recognize` swallows that into
+        # ``status="error"`` with empty text — every region silently blank. This
+        # model is single-GPU-sized, so plain ``.to(device)`` is correct.
+        dev = self.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._model = AutoModelForImageTextToText.from_pretrained(
-            self.model_id, dtype="auto", device_map="auto"
-        ).eval()
+            self.model_id, dtype="auto"
+        ).to(dev).eval()
 
     def _recognize_local(self, image: Image.Image) -> str:
         """Run the model on a region image. Returns recognized text."""
