@@ -255,6 +255,22 @@ class GlmOcrRecognizer(RegionRecognizer):
     _has_repetition = staticmethod(repetition.has_repetition)
     _truncate_repetition = staticmethod(repetition.truncate_repetition)
 
+    @staticmethod
+    def _strip_markdown_fences(text: str) -> str:
+        """Remove Markdown code-fence lines the model wraps transcriptions in.
+
+        GLM-OCR sometimes returns the page text inside a ```` ```markdown ```` /
+        ```` ``` ```` block — most often on small crops (so the residual pass
+        hits it hardest).  The fence lines are non-transcription noise that
+        corrupt line-based scoring, so drop any line that is only a code fence,
+        keeping the transcribed content between them.
+        """
+        if "```" not in text:
+            return text
+        lines = [ln for ln in text.splitlines()
+                 if not ln.lstrip().startswith("```")]
+        return "\n".join(lines).strip()
+
     def recognize(self, region: Region) -> Region:
         for attempt in range(self.max_retries + 1):
             try:
@@ -262,6 +278,7 @@ class GlmOcrRecognizer(RegionRecognizer):
                     text = self._recognize_api(region.image)
                 else:
                     text = self._recognize_local(region.image)
+                text = self._strip_markdown_fences(text)
             except Exception as exc:
                 if attempt < self.max_retries:
                     continue
