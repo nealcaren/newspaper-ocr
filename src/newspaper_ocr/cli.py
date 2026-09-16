@@ -10,8 +10,9 @@ import click
 @click.option("--backend", "-b", default="tesseract",
               help="Recognition backend: tesseract, tesserocr, effocr, glm-ocr, "
                    "openai, openrouter (use --model to name the hosted model)")
-@click.option("--detector", "-d", default="as_yolo",
-              help="Detection backend: as_yolo, paddlex")
+@click.option("--detector", "-d", default="auto",
+              help="Detection backend: auto (prefers paddlex, falls back to "
+                   "as_yolo), paddlex, as_yolo")
 @click.option("--output", "-o", default="text",
               help="Output format: text, json, hocr")
 @click.option("--model", "-m", default=None,

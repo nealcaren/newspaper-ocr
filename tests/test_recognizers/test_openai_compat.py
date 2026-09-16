@@ -118,6 +118,38 @@ class TestRecognize:
         assert reg.text == ""
         assert reg.status == "ok"
 
+    def test_extra_body_merged_into_request(self):
+        r = OpenAiCompatRecognizer(
+            model="m", api_key="sk-test",
+            extra_body={"temperature": 0, "usage": {"include": True}},
+        )
+        client = _FakeClient()
+        r._client = client
+        r.recognize(_region())
+        body = client.calls[0]["json"]
+        assert body["temperature"] == 0
+        assert body["usage"] == {"include": True}
+
+    def test_reported_cost_is_accumulated(self):
+        r = OpenAiCompatRecognizer(model="m", api_key="sk-test")
+
+        class CostClient:
+            def post(self, url, headers, json):
+                return _FakeResp(
+                    "hi",
+                    usage={
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                        "cost": 0.0025,
+                    },
+                )
+
+        r._client = CostClient()
+        r.recognize(_region())
+        r.recognize(_region())
+        assert r.usage_totals["reported_cost"] == pytest.approx(0.005)
+
     def test_error_yields_error_status(self):
         r = OpenAiCompatRecognizer(model="m", api_key="sk-test", max_retries=0)
         r._client = _FakeClient(raises=RuntimeError("boom"))

@@ -112,6 +112,7 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         max_tokens: int = 4096,
         token_param: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict | None = None,
         repetition_min_len: int = repetition.MIN_LEN,
         repetition_min_reps: int = repetition.MIN_REPS,
     ):
@@ -141,6 +142,10 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         self._token_param = token_param or "max_tokens"
         self._token_param_locked = token_param is not None
         self.extra_headers = dict(extra_headers or {})
+        # Extra top-level fields merged into every request body — e.g.
+        # ``{"temperature": 0}`` or OpenRouter's ``{"usage": {"include": True}}``
+        # to get per-request cost accounting back in the usage block.
+        self.extra_body = dict(extra_body or {})
         self.repetition_min_len = repetition_min_len
         self.repetition_min_reps = repetition_min_reps
 
@@ -149,12 +154,16 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         #: Running totals across every billed response this instance made.
         #: ``requests`` counts responses that reported usage; the token fields
         #: sum the corresponding ``usage`` values.
-        self.usage_totals: dict[str, int] = {
+        self.usage_totals: dict[str, float] = {
             "requests": 0,
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
             "cached_prompt_tokens": 0,
+            # Actual spend when the endpoint reports it (OpenRouter puts a
+            # ``cost`` field in usage). Stays 0.0 for endpoints that don't —
+            # use :meth:`cost` with published prices in that case.
+            "reported_cost": 0.0,
         }
 
         self._client = httpx.Client(timeout=timeout)
@@ -173,27 +182,27 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         b64 = base64.b64encode(buf.getvalue()).decode()
 
         def _post():
-            return self._client.post(
-                self.endpoint,
-                headers=self._headers(),
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{b64}"
-                                    },
+            body = {
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{b64}"
                                 },
-                                {"type": "text", "text": self.prompt},
-                            ],
-                        }
-                    ],
-                    self._token_param: self.max_tokens,
-                },
+                            },
+                            {"type": "text", "text": self.prompt},
+                        ],
+                    }
+                ],
+                self._token_param: self.max_tokens,
+                **self.extra_body,
+            }
+            return self._client.post(
+                self.endpoint, headers=self._headers(), json=body
             )
 
         resp = _post()
@@ -239,6 +248,7 @@ class OpenAiCompatRecognizer(RegionRecognizer):
         self.usage_totals["total_tokens"] += usage.get("total_tokens", 0) or 0
         details = usage.get("prompt_tokens_details") or {}
         self.usage_totals["cached_prompt_tokens"] += details.get("cached_tokens", 0) or 0
+        self.usage_totals["reported_cost"] += usage.get("cost", 0) or 0
 
     def cost(self, input_per_mtok: float, output_per_mtok: float,
              cached_input_per_mtok: float | None = None) -> float:

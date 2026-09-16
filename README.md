@@ -150,9 +150,16 @@ Three detection backends, plus battle-tested newspaper layout post-processing.
 
 | Detector | What it finds | Speed | Best for |
 |----------|--------------|-------|----------|
-| `as_yolo` (default) | Regions + lines | ~8s/page | Line-level OCR (Tesseract, EffOCR) |
-| `paddlex` | Regions only (20 categories) | varies | Region-level OCR, detailed layout analysis |
+| `paddlex` **(recommended)** | Regions only (20 categories) | varies | Newspapers/broadsheets; region-level OCR, detailed layout analysis |
+| `as_yolo` | Regions + lines | ~8s/page | Line-level OCR (Tesseract, EffOCR) on simple layouts |
 | `doclayout_yolo` | Regions only (10 categories) | varies | Region-level OCR; DocLayout-YOLO (defaults to the 1280px checkpoint, better on dense broadsheets) |
+
+The default is **`detector="auto"`**, which uses `paddlex` when it is installed
+and otherwise falls back to `as_yolo` (with a warning). PaddleX (PP-DocLayout) is
+strongly recommended for newspapers: on the [NewsBench](https://github.com/nealcaren/newsbench)
+set of dense pages it scores far higher than `as_yolo` (0.893 vs 0.711 bowF1 with
+Tesseract; `paddlex`+`glm-ocr` reaches 0.962), and the detector — not the
+recognizer — is the dominant factor. Install it with `pip install "newspaper-ocr[paddlex]"`.
 
 ### Layout Processing
 
@@ -316,6 +323,20 @@ rec = OpenAiCompatRecognizer(model="gpt-5.6-luna")
 Pipeline(recognizer=rec).analyze(page)   # RGB image
 print(rec.usage_totals)                  # {'requests': 23, 'prompt_tokens': 51502, ...}
 print(rec.cost(0.20, 1.20))              # ~$0.02 for a full page at that model's price
+```
+
+Pass `extra_body=` to add fields to every request (e.g. `{"temperature": 0}`,
+or OpenRouter's `{"usage": {"include": True}}` to get billed cost back). When the
+endpoint returns a `cost` (OpenRouter does), it accumulates in
+`rec.usage_totals["reported_cost"]` — exact dollars, no price table needed:
+
+```python
+rec = OpenRouterRecognizer(
+    model="google/gemini-3.5-flash-lite",
+    extra_body={"usage": {"include": True}},
+)
+Pipeline(detector="paddlex", recognizer=rec).analyze(page)
+print(rec.usage_totals["reported_cost"])   # e.g. 0.0318 — actual OpenRouter spend
 ```
 
 **2. Plug in any function.** For anything not OpenAI-shaped, pass a callable that

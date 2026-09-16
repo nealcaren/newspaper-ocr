@@ -1,5 +1,24 @@
+import importlib.util
+from unittest import mock
+
 import pytest
 from newspaper_ocr import Pipeline
+
+
+def test_auto_detector_prefers_paddlex_when_available():
+    with mock.patch.object(importlib.util, "find_spec", return_value=object()):
+        assert Pipeline._resolve_detector_name("auto") == "paddlex"
+
+
+def test_auto_detector_falls_back_to_as_yolo_with_warning():
+    with mock.patch.object(importlib.util, "find_spec", return_value=None):
+        with pytest.warns(UserWarning, match="PaddleX"):
+            assert Pipeline._resolve_detector_name("auto") == "as_yolo"
+
+
+def test_explicit_detector_name_passes_through():
+    assert Pipeline._resolve_detector_name("as_yolo") == "as_yolo"
+    assert Pipeline._resolve_detector_name("paddlex") == "paddlex"
 
 
 def test_pipeline_from_strings():

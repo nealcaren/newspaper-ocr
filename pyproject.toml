@@ -40,7 +40,7 @@ Issues = "https://github.com/nealcaren/newspaper-ocr/issues"
 
 [project.optional-dependencies]
 tesseract = []
-paddlex = ["paddlepaddle", "paddlex"]
+paddlex = ["paddlepaddle", "paddlex", "opencv-contrib-python", "pypdfium2"]
 doclayout = ["doclayout-yolo>=0.0.3", "dill", "huggingface-hub>=0.20"]
 glm-ocr = ["transformers>=5.1", "torch"]
 kraken = ["kraken>=5.0", "huggingface-hub>=0.20"]

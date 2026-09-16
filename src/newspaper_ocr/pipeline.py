@@ -18,7 +18,7 @@ _FALLBACK_PARTIAL = {"repetition", "chunked_partial"}
 class Pipeline:
     def __init__(
         self,
-        detector: Detector | str = "as_yolo",
+        detector: Detector | str = "auto",
         recognizer: LineRecognizer | RegionRecognizer | str | Callable = "tesseract",
         output: Formatter | str = "text",
         recognizer_model: str | Path | None = None,
@@ -41,7 +41,8 @@ class Pipeline:
 
         # Resolve detector
         if isinstance(detector, str):
-            det_cls = DETECTORS.get(detector)
+            name = self._resolve_detector_name(detector)
+            det_cls = DETECTORS.get(name)
             self.detector = det_cls(model_dir=model_cache_dir, skip_lines=skip_lines)
         else:
             self.detector = detector
@@ -112,6 +113,32 @@ class Pipeline:
         # Optional spell correction (off by default — it's aggressive)
         from newspaper_ocr.spell_checker import SpellChecker
         self.spell_checker = SpellChecker(enabled=spell_check)
+
+    @staticmethod
+    def _resolve_detector_name(detector: str) -> str:
+        """Map the ``"auto"`` detector to the best available concrete detector.
+
+        PaddleX (PP-DocLayout) is markedly better than ``as_yolo`` on dense,
+        multi-column newspaper pages, so ``"auto"`` (the default) prefers it when
+        installed and falls back to ``as_yolo`` otherwise — with a warning, since
+        ``as_yolo`` underperforms on broadsheets. Any explicit name is returned
+        unchanged (and resolves normally, erroring if unavailable).
+        """
+        if detector != "auto":
+            return detector
+        import importlib.util
+
+        if importlib.util.find_spec("paddlex") is not None:
+            return "paddlex"
+        import warnings
+
+        warnings.warn(
+            "PaddleX is not installed, so the 'auto' detector is falling back to "
+            "'as_yolo', which underperforms on dense newspaper pages. Install "
+            "newspaper-ocr[paddlex] for substantially better layout detection.",
+            stacklevel=3,
+        )
+        return "as_yolo"
 
     @staticmethod
     def _as_recognizer(recognizer):
