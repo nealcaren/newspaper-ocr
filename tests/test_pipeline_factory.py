@@ -5,14 +5,25 @@ import pytest
 from newspaper_ocr import Pipeline
 
 
-def test_auto_detector_prefers_paddlex_when_available():
-    with mock.patch.object(importlib.util, "find_spec", return_value=object()):
+def _spec(*present):
+    """find_spec stub: truthy for module names in *present*, None otherwise."""
+    return lambda name: object() if name in present else None
+
+
+def test_auto_detector_prefers_doclayout_when_available():
+    with mock.patch.object(importlib.util, "find_spec",
+                           side_effect=_spec("doclayout_yolo", "paddlex")):
+        assert Pipeline._resolve_detector_name("auto") == "doclayout_yolo"
+
+
+def test_auto_detector_prefers_paddlex_when_no_doclayout():
+    with mock.patch.object(importlib.util, "find_spec", side_effect=_spec("paddlex")):
         assert Pipeline._resolve_detector_name("auto") == "paddlex"
 
 
 def test_auto_detector_falls_back_to_as_yolo_with_warning():
     with mock.patch.object(importlib.util, "find_spec", return_value=None):
-        with pytest.warns(UserWarning, match="PaddleX"):
+        with pytest.warns(UserWarning, match="as_yolo"):
             assert Pipeline._resolve_detector_name("auto") == "as_yolo"
 
 

@@ -150,16 +150,24 @@ Three detection backends, plus battle-tested newspaper layout post-processing.
 
 | Detector | What it finds | Speed | Best for |
 |----------|--------------|-------|----------|
-| `paddlex` **(recommended)** | Regions only (20 categories) | varies | Newspapers/broadsheets; region-level OCR, detailed layout analysis |
+| `doclayout_yolo` **(recommended)** | Regions only (10 categories) | varies | Newspapers/broadsheets; region-level OCR — best accuracy (DocLayout-YOLO, 1280px checkpoint) |
+| `paddlex` | Regions only (20 categories) | varies | Newspapers/broadsheets; region-level OCR, detailed layout analysis |
 | `as_yolo` | Regions + lines | ~8s/page | Line-level OCR (Tesseract, EffOCR) on simple layouts |
-| `doclayout_yolo` | Regions only (10 categories) | varies | Region-level OCR; DocLayout-YOLO (defaults to the 1280px checkpoint, better on dense broadsheets) |
 
-The default is **`detector="auto"`**, which uses `paddlex` when it is installed
-and otherwise falls back to `as_yolo` (with a warning). PaddleX (PP-DocLayout) is
-strongly recommended for newspapers: on the [NewsBench](https://github.com/nealcaren/newsbench)
-set of dense pages it scores far higher than `as_yolo` (0.893 vs 0.711 bowF1 with
-Tesseract; `paddlex`+`glm-ocr` reaches 0.962), and the detector — not the
-recognizer — is the dominant factor. Install it with `pip install "newspaper-ocr[paddlex]"`.
+The default is **`detector="auto"`**, which prefers `doclayout_yolo` when it is
+installed, then `paddlex`, and otherwise falls back to `as_yolo` (with a warning).
+The **detector — not the recognizer — is the dominant factor** on dense newspaper
+pages. On [NewsBench](https://github.com/nealcaren/newsbench), with GLM-OCR:
+DocLayout-YOLO scores **0.970** overall, ahead of PaddleX **0.937** (and PaddleX
+**0.919** without the residual pass); `as_yolo` trails far behind. DocLayout-YOLO
+proposes finer, more complete regions, so it needs no residual recovery — but it
+makes more recognizer calls (≈2× slower). Install the recommended detector with
+`pip install "newspaper-ocr[doclayout]"` (or `[paddlex]`).
+
+The DocLayout-YOLO checkpoints are the official ones from the Hugging Face Hub —
+[`juliozhao/DocLayout-YOLO-DocStructBench-imgsz1280-2501`](https://huggingface.co/juliozhao/DocLayout-YOLO-DocStructBench-imgsz1280-2501)
+(default) and `juliozhao/DocLayout-YOLO-DocStructBench` (1024px) — downloaded and
+cached on first use.
 
 ### Layout Processing
 
