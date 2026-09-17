@@ -111,9 +111,9 @@ Recognition backends with different speed/accuracy tradeoffs.
 | `tesserocr` | region | ~25s | — | C API, region-level |
 | `kraken` | line | ~10s | 3.5% | Kraken LSTM, ~10x faster than Tesseract |
 | `trocr` | line | ~35s | 3.6% | Fine-tuned TrOCR, GPU recommended |
-| `glm-ocr` | region | ~300s | 1.7% | GLM-OCR VLM, GPU recommended |
+| `glm-ocr` | region | ~300s | 1.7% | GLM-OCR VLM (~1.3B params), GPU recommended |
 | `lightonocr` | region | ~500s | **1.1%** | LightOnOCR-2-1B VLM, GPU required |
-| `paddleocr-vl` | region | varies | — | PaddleOCR-VL VLM, GPU recommended; good fallback for regions another model failed on |
+| `paddleocr-vl` | region | varies | — | PaddleOCR-VL VLM (~0.96B params), GPU recommended; good fallback for regions another model failed on |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 | `openai` / `openrouter` | region | varies | — | Any OpenAI-compatible endpoint — bring your own hosted model |
 
@@ -299,8 +299,9 @@ model)**:
   `region.engine`.
 
 `paddleocr-vl` is the intended fallback — a different VLM often succeeds where the
-primary looped or timed out. It runs on a single CUDA GPU (as of 0.8.1); it is
-slower than GLM-OCR but slightly more accurate.
+primary looped or timed out. It runs on a single CUDA GPU (as of 0.8.1). Despite
+being the smaller model (~0.96B params vs GLM-OCR's ~1.3B) it is ~5× slower per
+page — the cost is its per-region decoding, not size — but slightly more accurate.
 
 One caveat on where you run it: `SIGALRM` can only be armed on the main thread
 of a Unix process, and that is what interrupts a hung call mid-forward-pass. In

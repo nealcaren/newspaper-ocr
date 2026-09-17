@@ -118,14 +118,11 @@ the no-harness baseline — everything above them is what layout detection buys.
 
 **The detector matters more than the recognizer.** Holding the recognizer fixed
 and only swapping the detector moves the score more than anything else (+0.15 for
-the VLMs, **+0.30** for Tesseract). Two things the version column captures:
-
-- **The residual pass (0.6.0 → 0.7.0) rescues the weaker detector.** On PaddleX,
-  turning it on by default lifted GLM-OCR from 0.919 → 0.937. Under DocLayout-YOLO
-  it's a near-no-op — the better detector leaves little uncovered — so DocLayout
-  needs no residual to reach the top.
-- **0.8.1 fixed VLM local (GPU) mode** (empty output from a `device_map`/timeout
-  bug); the DocLayout rows are that GPU matrix.
+the VLMs, **+0.30** for Tesseract). The version column also shows the residual
+pass earning its keep: on PaddleX, turning it on by default (**0.6.0 → 0.7.0**)
+lifted GLM-OCR from 0.919 → 0.937 by recovering columns PaddleX missed. Under
+DocLayout-YOLO it's a near-no-op — the better detector leaves little uncovered — so
+DocLayout needs no residual to reach the top.
 
 Practical guidance:
 
