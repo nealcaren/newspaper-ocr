@@ -92,25 +92,51 @@ recognizer, the recovery ladder, the residual second pass, output formats
 ## Which backend? (NewsBench results)
 
 On [NewsBench](https://github.com/nealcaren/newsbench) — dense, multi-column
-historical newspaper pages — **the detector matters more than the recognizer.**
-Every combination of the two strong detectors × three recognizers (n = 15,
-`overall` = 1 − CER, order-sensitive; higher is better):
+historical newspaper pages, n = 15. `overall` = 1 − CER (order-sensitive);
+`cased` keeps case + punctuation; `bowF1` is order-free bag-of-words F1; `$/100pg`
+is real API spend ($0 = local). Higher is better.
 
-| Detector | Recognizer | overall | cased | bowF1 |
-|:---|:---|:---:|:---:|:---:|
-| **DocLayout-YOLO** | PaddleOCR-VL | **0.970** | 0.953 | 0.985 |
-| **DocLayout-YOLO** | GLM-OCR | 0.959 | 0.943 | 0.985 |
-| **DocLayout-YOLO** | Tesseract | 0.919 | 0.889 | 0.910 |
-| AS-YOLO | PaddleOCR-VL | 0.816 | 0.801 | 0.937 |
-| AS-YOLO | GLM-OCR | 0.803 | 0.788 | 0.942 |
-| AS-YOLO | Tesseract | 0.620 | 0.602 | 0.706 |
+| Detector | Recognizer | newspaper-ocr | overall | cased | bowF1 | $/100pg |
+|:---|:---|:---:|:---:|:---:|:---:|:---:|
+| **DocLayout-YOLO** | PaddleOCR-VL | 0.8.1 | **0.970** | **0.953** | 0.985 | $0.00 |
+| **DocLayout-YOLO** | GLM-OCR | 0.8.1 | 0.959 | 0.943 | 0.985 | $0.00 |
+| PaddleX | GLM-OCR | 0.7.0 | 0.937 | 0.922 | 0.980 | $0.00 |
+| PaddleX | Gemini-flash-lite | 0.7.0 | 0.936 | 0.915 | 0.944 | $4.51 |
+| **DocLayout-YOLO** | Tesseract | 0.8.1 | 0.919 | 0.889 | 0.910 | $0.00 |
+| PaddleX | GLM-OCR | 0.6.0 | 0.919 | 0.905 | 0.961 | $0.00 |
+| PaddleX | Tesseract | 0.7.0 | 0.899 | 0.874 | 0.891 | $0.00 |
+| none (whole page) | Gemini-flash-lite | 0.7.0 | 0.820 | 0.803 | 0.867 | $2.88 |
+| AS-YOLO | PaddleOCR-VL | 0.8.1 | 0.816 | 0.801 | 0.937 | $0.00 |
+| AS-YOLO | GLM-OCR | 0.8.1 | 0.803 | 0.788 | 0.942 | $0.00 |
+| none (whole page) | Tesseract | — | 0.677 | 0.662 | 0.844 | $0.00 |
+| AS-YOLO | Tesseract | 0.8.1 | 0.620 | 0.602 | 0.706 | $0.00 |
 
-Holding the recognizer fixed and only swapping the detector moves the score more
-than anything else (+0.15 for the VLMs, **+0.30** for Tesseract). Practical guidance:
+**The harness earns its keep.** Compare the same recognizer with no detector (raw
+whole page) vs the full detect → layout pipeline: Tesseract **0.677 → 0.919
+(+0.24)** and Gemini-flash-lite **0.820 → 0.936 (+0.12)**. The whole-page rows are
+the no-harness baseline — everything above them is what layout detection buys.
+
+**The detector matters more than the recognizer.** Holding the recognizer fixed
+and only swapping the detector moves the score more than anything else (+0.15 for
+the VLMs, **+0.30** for Tesseract). Two things the version column captures:
+
+- **The residual pass (0.6.0 → 0.7.0) rescues the weaker detector.** On PaddleX,
+  turning it on by default lifted GLM-OCR from 0.919 → 0.937. Under DocLayout-YOLO
+  it's a near-no-op — the better detector leaves little uncovered — so DocLayout
+  needs no residual to reach the top.
+- **0.8.1 fixed VLM local (GPU) mode** (empty output from a `device_map`/timeout
+  bug); the DocLayout rows are that GPU matrix.
+
+Practical guidance:
 
 - **Best accuracy:** `detector="auto"` (→ DocLayout-YOLO) + a region VLM (`glm-ocr` or `paddleocr-vl`).
+- **Cheapest hosted:** PaddleX + Gemini-flash-lite reaches 0.936 at ~$4.51/100 pages.
 - **Free / fully local / no GPU:** DocLayout-YOLO + Tesseract still reaches 0.919.
 - **Avoid** the whole-page (no-detector) path on dense pages — layout is the bottleneck.
+
+_(0.8.1 rows are the GPU matrix, all one environment; 0.6.0/0.7.0 rows are the
+earlier Mac/MLX + hosted-API runs. Full sheet with tokens/speed:_
+`python scoresheet.py` _in the [NewsBench](https://github.com/nealcaren/newsbench) repo.)_
 
 ## Architecture
 
