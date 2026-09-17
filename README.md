@@ -105,7 +105,7 @@ is real API spend ($0 = local). Higher is better.
 | **DocLayout-YOLO** | Tesseract | 0.8.1 | 0.919 | 0.889 | 0.910 | $0.00 |
 | PaddleX | GLM-OCR | 0.6.0 | 0.919 | 0.905 | 0.961 | $0.00 |
 | PaddleX | Tesseract | 0.7.0 | 0.899 | 0.874 | 0.891 | $0.00 |
-| none (whole page) | Gemini-flash-lite | 0.7.0 | 0.820 | 0.803 | 0.867 | $2.88 |
+| none (whole page) | Gemini-flash-lite | — | 0.820 | 0.803 | 0.867 | $2.88 |
 | AS-YOLO | PaddleOCR-VL | 0.8.1 | 0.816 | 0.801 | 0.937 | $0.00 |
 | AS-YOLO | GLM-OCR | 0.8.1 | 0.803 | 0.788 | 0.942 | $0.00 |
 | none (whole page) | Tesseract | — | 0.677 | 0.662 | 0.844 | $0.00 |
