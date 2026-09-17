@@ -81,6 +81,7 @@ class GlmOcrRecognizer(RegionRecognizer):
         mlx_model_id: str = "mlx-community/GLM-OCR-bf16",
         timeout: float = 120,
         max_retries: int = 2,
+        max_new_tokens: int = 4096,
         repetition_min_len: int = repetition.MIN_LEN,
         repetition_min_reps: int = repetition.MIN_REPS,
     ):
@@ -90,6 +91,7 @@ class GlmOcrRecognizer(RegionRecognizer):
         self.mlx_model_id = mlx_model_id
         self.timeout = timeout
         self.max_retries = max_retries
+        self.max_new_tokens = max_new_tokens
         self.repetition_min_len = repetition_min_len
         self.repetition_min_reps = repetition_min_reps
 
@@ -149,7 +151,7 @@ class GlmOcrRecognizer(RegionRecognizer):
                         ],
                     }
                 ],
-                "max_tokens": 4096,
+                "max_tokens": self.max_new_tokens,
             },
         )
         resp.raise_for_status()
@@ -222,7 +224,7 @@ class GlmOcrRecognizer(RegionRecognizer):
         inputs.pop("token_type_ids", None)
         inputs = {k: v.to(self._model.device) for k, v in inputs.items()}
 
-        gen_kwargs = {"max_new_tokens": 4096}
+        gen_kwargs = {"max_new_tokens": self.max_new_tokens}
         deadline = time.monotonic() + self.timeout if self.timeout else None
         if deadline is not None:
             gen_kwargs["stopping_criteria"] = self._deadline_criteria(deadline)
