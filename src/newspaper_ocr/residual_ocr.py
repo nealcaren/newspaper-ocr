@@ -28,7 +28,9 @@ Algorithm (per pass)
 4. **Recognize** each residual block with the region recognizer (column-sized
    crops — no whole-page blowup, no per-line call storm).
 5. **Merge + re-sort** — add the residual regions to the pass-1 set and re-run the
-   existing reading-order sort so they land in sequence, not appended.
+   existing reading-order sort so they land in sequence, not appended.  When the
+   detector supplied native order (``PageLayout.ordered``), the pass-1 order is
+   kept and the residual regions are inserted into it instead.
 
 Because covered ink is erased before step 3, recovered crops **cannot** duplicate
 already-captured text, so no lossy dedup is needed and precision is preserved.
@@ -196,7 +198,8 @@ class ResidualOcr:
     def recover(self, layout: PageLayout) -> PageLayout:
         """Run the residual pass(es) and return a new :class:`PageLayout`."""
         self.actions = []
-        regions = list(layout.regions)
+        base = list(layout.regions)
+        regions = list(base)
         self._resolve_scale(regions)
         ink = self._ink_mask(layout.image)
         total_ink = int(ink.sum())
@@ -228,7 +231,12 @@ class ResidualOcr:
             if gained.sum() / total_ink < self.min_gain_ink:
                 break
 
-        regions = self._reading_order(regions, layout)
+        if layout.ordered:
+            # Keep the detector's native order; slot recovered blocks into it.
+            from newspaper_ocr.layout_processor import insert_in_order
+            regions = insert_in_order(base, regions[len(base):])
+        else:
+            regions = self._reading_order(regions, layout)
         return self._rebuild(layout, regions)
 
     # -- ink / coverage masks ---------------------------------------------------
@@ -410,4 +418,5 @@ class ResidualOcr:
             r.id = f"r{i}"
         return PageLayout(image=layout.image, regions=regions,
                           width=layout.width, height=layout.height,
-                          lines_detected=layout.lines_detected)
+                          lines_detected=layout.lines_detected,
+                          ordered=layout.ordered)

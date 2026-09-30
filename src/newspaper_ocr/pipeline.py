@@ -34,6 +34,7 @@ class Pipeline:
         chunk_height: int = chunking.CHUNK_HEIGHT,
         chunk_overlap: int = chunking.CHUNK_OVERLAP,
         residual_ocr: bool | str = "auto",
+        hole_fill_detector: Detector | str | None = None,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -41,12 +42,21 @@ class Pipeline:
         from newspaper_ocr.layout_processor import LayoutProcessor
 
         # Resolve detector
-        if isinstance(detector, str):
-            name = self._resolve_detector_name(detector)
-            det_cls = DETECTORS.get(name)
-            self.detector = det_cls(model_dir=model_cache_dir, skip_lines=skip_lines)
-        else:
-            self.detector = detector
+        def build_detector(spec):
+            if not isinstance(spec, str):
+                return spec
+            det_cls = DETECTORS.get(self._resolve_detector_name(spec))
+            return det_cls(model_dir=model_cache_dir, skip_lines=skip_lines)
+
+        self.detector = build_detector(detector)
+
+        # Optional hole fill: a second detector adds only the inked regions the
+        # first one missed (see newspaper_ocr.detectors.union.UnionDetector).
+        if hole_fill_detector is not None:
+            from newspaper_ocr.detectors.union import UnionDetector
+            self.detector = UnionDetector(
+                self.detector, build_detector(hole_fill_detector)
+            )
 
         # Resolve recognizer
         if isinstance(recognizer, str):

@@ -20,6 +20,11 @@ Pipeline stages (in order):
   6. _merge_adjacent   – merge vertically adjacent same-column text blocks
   7. _drop_empty_overlaps – drop OCR-label regions the line detector found
      nothing in (skipped when no line detection ran — see PageLayout.lines_detected)
+
+When the detector already supplies reading order (``PageLayout.ordered``), only
+the confidence filter/rescue and the empty-overlap drop run, in place: sorting,
+merging, gap-filling and dedup would all second-guess the detector's own blocks.
+New regions (hole fill, residual recovery) go in with :func:`insert_in_order`.
 """
 
 from __future__ import annotations
@@ -108,6 +113,68 @@ def _find_columns(
     return filtered, median_w
 
 
+def _overlapping_cols(
+    x1: float, x2: float, col_centers: list[tuple[float, float, float]]
+) -> list[int]:
+    """Columns a box spanning x1..x2 covers (>20% of the column's width), or
+    the nearest column by centre when it covers none."""
+    cols = []
+    for c, (center, cl, cr) in enumerate(col_centers):
+        overlap = min(x2, cr) - max(x1, cl)
+        col_w = cr - cl
+        if col_w > 0 and overlap > col_w * 0.2:
+            cols.append(c)
+    return cols if cols else [
+        min(range(len(col_centers)),
+            key=lambda c: abs(col_centers[c][0] - (x1 + x2) / 2))
+    ]
+
+
+def insert_in_order(base: list[Region], extras: list[Region]) -> list[Region]:
+    """Insert *extras* into an already-ordered *base* without re-sorting it.
+
+    Each extra goes before the first base region that sits in a later column,
+    or in the same column but lower on the page (a region's column is the
+    leftmost one it covers).  Extras that land at the same point keep column
+    then top-to-bottom order among themselves.  Columns are found from all
+    boxes together; with no discernible columns, placement is by y alone.
+    """
+    if not extras:
+        return list(base)
+    if not base:
+        return sorted(extras, key=lambda r: (r.bbox.y0, r.bbox.x0))
+
+    boxes = np.asarray([_bbox_tuple(r) for r in base + extras], dtype=int)
+    col_centers, _ = _find_columns(boxes)
+
+    def col(r: Region) -> int:
+        if not col_centers:
+            return 0
+        return min(_overlapping_cols(r.bbox.x0, r.bbox.x1, col_centers))
+
+    base_cols = [col(b) for b in base]
+    placed: list[tuple[int, int, int, int, Region]] = []
+    for k, e in enumerate(extras):
+        ec, ey = col(e), e.bbox.y0
+        pos = len(base)
+        for i, b in enumerate(base):
+            if base_cols[i] > ec or (base_cols[i] == ec and b.bbox.y0 > ey):
+                pos = i
+                break
+        placed.append((pos, ec, ey, k, e))
+    placed.sort(key=lambda t: t[:4])
+
+    out: list[Region] = []
+    j = 0
+    for i, b in enumerate(base):
+        while j < len(placed) and placed[j][0] == i:
+            out.append(placed[j][4])
+            j += 1
+        out.append(b)
+    out.extend(p[4] for p in placed[j:])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # LayoutProcessor
 # ---------------------------------------------------------------------------
@@ -137,6 +204,9 @@ class LayoutProcessor:
         if not self.enabled:
             return layout
 
+        if layout.ordered:
+            return self._process_ordered(layout)
+
         regions = layout.regions
         regions = self._filter(regions)
         regions = self._rescue_low_confidence(regions, layout.regions)
@@ -146,6 +216,19 @@ class LayoutProcessor:
         regions = self._merge_adjacent(regions, layout.image)
         regions = self._drop_empty_overlaps(regions, layout.lines_detected)
         layout.regions = regions
+        return layout
+
+    def _process_ordered(self, layout: PageLayout) -> PageLayout:
+        """Post-process a layout whose detector supplied reading order.
+
+        Applies the confidence filter/rescue as a membership test so surviving
+        regions keep their original positions, then the empty-overlap drop.
+        """
+        kept = self._filter(layout.regions)
+        kept = self._rescue_low_confidence(kept, layout.regions)
+        keep_ids = {id(r) for r in kept}
+        regions = [r for r in layout.regions if id(r) in keep_ids]
+        layout.regions = self._drop_empty_overlaps(regions, layout.lines_detected)
         return layout
 
     # ------------------------------------------------------------------
@@ -408,21 +491,10 @@ class LayoutProcessor:
 
         num_cols = len(col_centers)
 
-        def overlapping_cols(x1: int, x2: int) -> list[int]:
-            cols = []
-            for c, (center, cl, cr) in enumerate(col_centers):
-                overlap = min(x2, cr) - max(x1, cl)
-                col_w = cr - cl
-                if col_w > 0 and overlap > col_w * 0.2:
-                    cols.append(c)
-            return cols if cols else [
-                min(range(num_cols), key=lambda c: abs(col_centers[c][0] - (x1 + x2) / 2))
-            ]
-
         assignments = []
         for i in range(n):
             x1, y1, x2, y2 = boxes[i]
-            cols = overlapping_cols(x1, x2)
+            cols = _overlapping_cols(x1, x2, col_centers)
             assignments.append((i, cols, int(y1)))
 
         col_buckets: list[list[tuple[int, int]]] = [[] for _ in range(num_cols)]
@@ -510,6 +582,7 @@ class LayoutProcessor:
                     lines=list(region.lines),
                     text=region.text,
                     confidence=region.confidence,
+                    source=region.source,
                 )
                 continue
 
@@ -544,6 +617,9 @@ class LayoutProcessor:
                     lines=current.lines + region.lines,
                     text=combined_text,
                     confidence=max(current.confidence, region.confidence),
+                    # A block that absorbed any primary region counts as primary.
+                    source=(current.source if current.source == region.source
+                            else "primary"),
                 )
             else:
                 merged.append(current)
@@ -554,6 +630,7 @@ class LayoutProcessor:
                     lines=list(region.lines),
                     text=region.text,
                     confidence=region.confidence,
+                    source=region.source,
                 )
 
         if current is not None:

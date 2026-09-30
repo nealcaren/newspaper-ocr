@@ -24,6 +24,7 @@ class JsonFormatter(Formatter):
                     "text": r.text,
                     "status": r.status,
                     "confidence": r.confidence,
+                    **({"source": r.source} if r.source else {}),
                     "lines": [
                         {
                             "text": line.text,
