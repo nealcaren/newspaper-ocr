@@ -99,7 +99,11 @@ def run_batch(
     root = Path(input_root) if input_root is not None else None
     summary = BatchSummary()
     start = time.monotonic()
-    log = open(log_path, "a", encoding="utf-8") if log_path else None
+    log = None
+    if log_path:
+        # The log commonly lives inside a not-yet-created outdir.
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        log = open(log_path, "a", encoding="utf-8")
     try:
         for source in map(Path, inputs):
             for record in _run_source(pipe, source, outdir, fmt, pages, rotate, dpi,

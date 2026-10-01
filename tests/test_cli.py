@@ -164,3 +164,12 @@ def test_cli_rejects_bad_shard(tmp_path, spec):
 def test_cli_batch_flags_need_outdir(tmp_path):
     result = CliRunner().invoke(main, [str(tmp_path), "--skip-existing"])
     assert result.exit_code != 0 and "--outdir" in result.output
+
+
+def test_cli_log_inside_new_outdir(tmp_path, fake_pipeline):
+    _make_pdf(tmp_path / "issue.pdf", 1)
+    out = tmp_path / "out"
+    result = CliRunner().invoke(
+        main, [str(tmp_path / "issue.pdf"), "--outdir", str(out), "--log", str(out / "log.jsonl")])
+    assert result.exit_code == 0, result.output
+    assert (out / "log.jsonl").exists()
