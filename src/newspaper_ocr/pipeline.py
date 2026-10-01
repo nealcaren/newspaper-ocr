@@ -128,9 +128,14 @@ class Pipeline:
         # Residual second-pass recovery (mask detected boxes -> re-OCR leftover
         # ink). "auto" (default) enables it for region-level recognizers, where
         # it's validated and do-no-harm-gated; it stays off for line recognizers
-        # (e.g. Tesseract). True forces it on for any region-capable recognizer;
-        # False disables it. See newspaper_ocr.residual_ocr.ResidualOcr.
+        # (e.g. Tesseract), and "auto" also skips pages whose detector supplied
+        # its own reading order (e.g. MinerU): its fine boxes leave little real
+        # residue, and on NewsBench the pass only added duplicates there
+        # (MinerU + DocLayout holes: 0.974 without, 0.966 with). True forces it
+        # on for any region-capable recognizer; False disables it. See
+        # newspaper_ocr.residual_ocr.ResidualOcr.
         self.residual = None
+        self._residual_auto = residual_ocr == "auto"
         if residual_ocr:
             is_region = isinstance(self.recognizer, RegionRecognizer)
             enable = is_region if residual_ocr == "auto" else True
@@ -339,8 +344,15 @@ class Pipeline:
                     # fall back to region-level OCR
                     self.recognizer.recognize_region(region)
         elif isinstance(self.recognizer, RegionRecognizer):
+            # A recognizer that batches a page's regions in one call (e.g.
+            # MinerU) reads them all up front; the recovery ladder still runs
+            # per region on the results.
+            batch = getattr(self.recognizer, "recognize_regions", None)
+            if batch is not None:
+                layout.regions = batch(layout.image, layout.regions)
             for i, region in enumerate(layout.regions):
-                region = self.recognizer.recognize(region)
+                if batch is None:
+                    region = self.recognizer.recognize(region)
                 # Escalation ladder: primary -> chunked re-OCR (same model, for
                 # a tall region that timed out) -> fallback recognizer.
                 if (
@@ -373,7 +385,7 @@ class Pipeline:
         # columns/mastheads), then re-sort into reading order. Runs after the
         # recovery ladder so it works on the final pass-1 regions; gated to a
         # no-op when little ink is uncovered.
-        if self.residual is not None:
+        if self.residual is not None and not (self._residual_auto and layout.ordered):
             layout = self.residual.recover(layout)
 
         # Text cleaning (dehyphenation, line joining) only for line-level recognizers.

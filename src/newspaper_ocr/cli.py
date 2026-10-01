@@ -9,10 +9,10 @@ import click
 @click.argument("images", nargs=-1, required=True, type=click.Path(exists=True))
 @click.option("--backend", "-b", default="tesseract",
               help="Recognition backend: tesseract, tesserocr, effocr, glm-ocr, "
-                   "openai, openrouter (use --model to name the hosted model)")
+                   "paddleocr-vl, mineru, openai, openrouter (use --model to name the hosted model)")
 @click.option("--detector", "-d", default="auto",
-              help="Detection backend: auto (prefers paddlex, falls back to "
-                   "as_yolo), paddlex, as_yolo")
+              help="Detection backend: auto (prefers doclayout_yolo, then paddlex, "
+                   "then as_yolo), doclayout_yolo, paddlex, mineru, as_yolo")
 @click.option("--hole-fill-detector", default=None,
               help="Second detector whose boxes fill inked holes the main "
                    "detector missed (e.g. doclayout_yolo)")
