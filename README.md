@@ -113,6 +113,7 @@ is real API spend ($0 = local). Higher is better.
 | Detector | Recognizer | newspaper-ocr | overall | cased | bowF1 | $/100pg |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|
 | **MinerU2.5 + DocLayout holes** | MinerU2.5 | 0.9.0 | **0.974** | **0.957** | 0.985 | $0.00 |
+| **MinerU2.5 (vLLM) + DocLayout holes** | MinerU2.5 | 0.10.0 | 0.973 | 0.956 | 0.986 | $0.00 |
 | **DocLayout-YOLO** | PaddleOCR-VL | 0.8.1 | 0.970 | 0.953 | 0.985 | $0.00 |
 | MinerU2.5 | MinerU2.5 | 0.9.0 | 0.966 | 0.950 | 0.981 | $0.00 |
 | **DocLayout-YOLO** | GLM-OCR | 0.8.1 | 0.959 | 0.943 | 0.985 | $0.00 |
@@ -148,7 +149,8 @@ Practical guidance:
 - **Free / fully local / no GPU:** DocLayout-YOLO + Tesseract still reaches 0.919.
 - **Avoid** the whole-page (no-detector) path on dense pages — layout is the bottleneck.
 
-_(0.8.1 and 0.9.0 rows are the GPU matrix (L40S); 0.6.0/0.7.0 rows are the
+_(0.8.1, 0.9.0 and 0.10.0 rows are the GPU matrix (L40S); the vLLM row runs
+~20× faster at the same accuracy; 0.6.0/0.7.0 rows are the
 earlier Mac/MLX + hosted-API runs. Full sheet with tokens/speed:_
 `python scoresheet.py` _in the [NewsBench](https://github.com/nealcaren/newsbench) repo.)_
 
