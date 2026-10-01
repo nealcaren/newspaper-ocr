@@ -116,6 +116,11 @@ def _vllm_engine(model: str):
             '  pip install "newspaper-ocr[mineru-vllm]"'
         )
     memory = float(os.environ.get("NEWSPAPER_OCR_VLLM_GPU_MEMORY", VLLM_GPU_MEMORY))
+    # vLLM's default FlashInfer sampler JIT-compiles a CUDA kernel on first
+    # use, which fails on cluster nodes without a CUDA toolkit ("Could not
+    # find nvcc"). PyTorch-native sampling needs no compiler and costs little
+    # at MinerU's short outputs; set the variable to 1 to opt back in.
+    os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
     # MinerU's no-repeat-ngram processor is what its own vLLM pipeline uses
     # to stop the model looping on dense text.
     return LLM(
