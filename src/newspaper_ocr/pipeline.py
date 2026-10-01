@@ -339,8 +339,15 @@ class Pipeline:
                     # fall back to region-level OCR
                     self.recognizer.recognize_region(region)
         elif isinstance(self.recognizer, RegionRecognizer):
+            # A recognizer that batches a page's regions in one call (e.g.
+            # MinerU) reads them all up front; the recovery ladder still runs
+            # per region on the results.
+            batch = getattr(self.recognizer, "recognize_regions", None)
+            if batch is not None:
+                layout.regions = batch(layout.image, layout.regions)
             for i, region in enumerate(layout.regions):
-                region = self.recognizer.recognize(region)
+                if batch is None:
+                    region = self.recognizer.recognize(region)
                 # Escalation ladder: primary -> chunked re-OCR (same model, for
                 # a tall region that timed out) -> fallback recognizer.
                 if (

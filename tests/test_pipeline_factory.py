@@ -77,3 +77,36 @@ def test_hole_fill_detector_wraps_primary_in_union():
 
     assert Pipeline(detector=primary, recognizer=lambda img: "",
                     residual_ocr=False).detector is primary
+
+
+def test_region_recognizer_batch_hook_reads_page_once():
+    from PIL import Image
+    from newspaper_ocr.detectors.base import Detector
+    from newspaper_ocr.models import BBox, PageLayout, Region
+    from newspaper_ocr.recognizers.base import RegionRecognizer
+
+    class TwoBoxes(Detector):
+        def detect(self, image):
+            regions = [Region(bbox=BBox(0, 0, 10, 10), image=image.crop((0, 0, 10, 10)),
+                              label="text", confidence=1.0),
+                       Region(bbox=BBox(0, 20, 10, 30), image=image.crop((0, 20, 10, 30)),
+                              label="text", confidence=1.0)]
+            return PageLayout(image=image, regions=regions, width=50, height=50,
+                              ordered=True)
+
+    class Batched(RegionRecognizer):
+        calls = 0
+
+        def recognize(self, region):
+            raise AssertionError("per-region path should not run")
+
+        def recognize_regions(self, page_image, regions):
+            Batched.calls += 1
+            for i, r in enumerate(regions):
+                r.text = f"t{i}"
+            return regions
+
+    pipe = Pipeline(detector=TwoBoxes(), recognizer=Batched(), residual_ocr=False)
+    layout = pipe.analyze(Image.new("RGB", (50, 50), "white"))
+    assert Batched.calls == 1
+    assert [r.text for r in layout.regions] == ["t0", "t1"]

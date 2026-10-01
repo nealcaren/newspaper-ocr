@@ -52,6 +52,13 @@ try:
 except ImportError:
     pass
 
+try:
+    import mineru_vl_utils  # noqa: F401  (optional [mineru] extra)
+    from newspaper_ocr.recognizers.mineru import MineruRecognizer
+    RECOGNIZERS.register("mineru", MineruRecognizer)
+except ImportError:
+    pass
+
 # User-supplied OCR devices via any OpenAI-compatible chat-completions endpoint.
 # Nothing runs locally, so these stay useful as hosted models change: just name a
 # model (--model / recognizer_model=) and set the API-key env var.

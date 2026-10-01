@@ -17,3 +17,10 @@ try:
     DETECTORS.register("doclayout_yolo", DocLayoutYoloDetector)
 except ImportError:
     pass
+
+try:
+    import mineru_vl_utils  # noqa: F401  (optional [mineru] extra)
+    from newspaper_ocr.detectors.mineru import MineruDetector
+    DETECTORS.register("mineru", MineruDetector)
+except ImportError:
+    pass
