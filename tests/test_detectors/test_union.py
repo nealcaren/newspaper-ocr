@@ -206,3 +206,94 @@ def test_merge_keeps_source():
     c = _r(410, 10, 590, 100, "c"); c.source = "hole"
     out = LayoutProcessor()._merge_adjacent([a, b, c], _page())
     assert [r.source for r in out] == ["primary", "hole"]
+
+
+# ---------------------------------------------------------------------------
+# Regressions from PR #23 testing
+# ---------------------------------------------------------------------------
+
+def test_negative_boxes_do_not_wrap_around():
+    img = _page([(0, 0, 600, 400)])
+    # An off-page secondary box must not be accepted as a hole...
+    union = UnionDetector(FixedDetector([]), FixedDetector([(-50, -50, -5, -5, "off")]))
+    assert union.detect(img).regions == []
+    # ...and an off-page primary box must not mask a real candidate.
+    union = UnionDetector(FixedDetector([(-50, -50, -5, -5, "off")]),
+                          FixedDetector([(100, 100, 200, 200, "H")]))
+    assert "H" in _names(union.detect(img).regions)
+
+
+def test_exclude_labels():
+    img = _page([(0, 0, 600, 400)])
+    prim = FixedDetector([(0, 0, 300, 400, "P")])
+    union = UnionDetector(prim, FixedDetector([]), exclude_labels={"abandon"})
+    cands = [_r(310, 0, 600, 100, "junk", label="abandon"),
+             _r(310, 120, 600, 400, "H")]
+    assert _names(union.find_holes(img, prim.detect(img).regions, cands)) == ["H"]
+
+
+def test_same_slot_ties_break_left_to_right():
+    base = [_r(*b[:4], name=b[4]) for b in THREE_COLS]
+    extras = [_r(300, 0, 590, 8, name="right"), _r(10, 0, 300, 8, name="left")]
+    out = insert_in_order(base, extras)
+    assert _names(out)[:2] == ["left", "right"]
+
+
+# Two sections: masthead, three upper columns, a full-width banner, three
+# lower columns; native order is section by section, column by column.
+SECTIONED = [
+    (10, 10, 590, 60, "M"),
+    (10, 70, 190, 200, "A1"), (10, 210, 190, 340, "A2"),
+    (210, 70, 390, 200, "B1"), (210, 210, 390, 340, "B2"),
+    (410, 70, 590, 200, "C1"), (410, 210, 590, 340, "C2"),
+    (10, 350, 590, 400, "BAN"),
+    (10, 410, 190, 590, "LA1"), (10, 600, 190, 780, "LA2"),
+    (210, 410, 390, 590, "LB1"), (210, 600, 390, 780, "LB2"),
+    (410, 410, 590, 590, "LC1"), (410, 600, 590, 780, "LC2"),
+]
+
+
+def _drop_one(boxes, name):
+    """Base without *name*, plus *name* as the extra."""
+    base = [_r(*b[:4], name=b[4]) for b in boxes if b[4] != name]
+    extra = [_r(*b[:4], name=b[4]) for b in boxes if b[4] == name]
+    return base, extra
+
+
+def _order(boxes):
+    return [b[4] for b in boxes]
+
+
+def test_sectioned_page_recovers_every_dropped_region():
+    for b in SECTIONED:
+        base, extra = _drop_one(SECTIONED, b[4])
+        assert _names(insert_in_order(base, extra)) == _order(SECTIONED), b[4]
+
+
+def test_column_major_page_recovers_every_dropped_region():
+    for b in THREE_COLS:
+        base, extra = _drop_one(THREE_COLS, b[4])
+        assert _names(insert_in_order(base, extra)) == _order(THREE_COLS), b[4]
+
+
+def test_row_major_page_recovers_every_dropped_region():
+    row_major = [THREE_COLS[i] for i in (0, 2, 4, 1, 3, 5)]
+    for b in row_major:
+        base, extra = _drop_one(row_major, b[4])
+        assert _names(insert_in_order(base, extra)) == _order(row_major), b[4]
+
+
+def test_split_masthead_pieces_go_first_left_to_right():
+    base = [_r(*b[:4], name=b[4]) for b in SECTIONED if b[4] != "M"]
+    pieces = [_r(410, 10, 590, 60, name="M3"), _r(10, 10, 190, 60, name="M1"),
+              _r(210, 10, 390, 60, name="M2")]
+    assert _names(insert_in_order(base, pieces))[:4] == ["M1", "M2", "M3", "A1"]
+
+
+def test_hole_under_multi_column_head_stays_in_its_column():
+    # Side-by-side blocks (A beside a B+C head, B beside C) must not make a
+    # column-major order look row-major.
+    base = [_r(10, 10, 190, 390, name="A"), _r(210, 10, 590, 100, name="BC_head"),
+            _r(210, 110, 390, 390, name="B"), _r(410, 110, 590, 390, name="C")]
+    out = insert_in_order(base, [_r(410, 101, 590, 109, name="HC")])
+    assert _names(out) == ["A", "BC_head", "B", "HC", "C"]

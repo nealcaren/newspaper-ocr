@@ -17,6 +17,8 @@ come through unchanged.  See issue #22.
 """
 from __future__ import annotations
 
+from typing import Iterable
+
 import numpy as np
 from PIL import Image
 
@@ -38,6 +40,10 @@ class UnionDetector(Detector):
     ink_thresh : int or None
         Grayscale level below which a pixel counts as ink; ``None`` picks the
         level per page with Otsu's method (safer on dark microfilm).
+    exclude_labels : iterable of str
+        Secondary labels never used as holes, e.g. ``{"abandon"}`` to skip
+        DocLayout-YOLO's header/footer/page-number/noise class.  Empty by
+        default, matching the NewsBench prototype.
 
     The returned layout tags each region's ``source`` as ``"primary"`` or
     ``"hole"``.  If the primary layout is ``ordered``, holes are inserted into
@@ -53,12 +59,14 @@ class UnionDetector(Detector):
         overlap_max: float = 0.15,
         ink_min: float = 0.012,
         ink_thresh: int | None = 128,
+        exclude_labels: Iterable[str] = (),
     ):
         self.primary = primary
         self.secondary = secondary
         self.overlap_max = overlap_max
         self.ink_min = ink_min
         self.ink_thresh = ink_thresh
+        self.exclude_labels = frozenset(exclude_labels)
         #: Number of holes added on the most recent page, for diagnostics.
         self.last_n_holes = 0
 
@@ -104,6 +112,8 @@ class UnionDetector(Detector):
 
         holes: list[Region] = []
         for r in sorted(candidates, key=lambda r: -r.confidence):
+            if r.label in self.exclude_labels:
+                continue
             sl = self._slice(r, w, h)
             if covered[sl].size == 0:
                 continue
@@ -125,5 +135,7 @@ class UnionDetector(Detector):
 
     @staticmethod
     def _slice(r: Region, w: int, h: int) -> tuple[slice, slice]:
+        # Clamp both ends to the page: a negative stop would wrap around.
         b = r.bbox
-        return (slice(max(0, b.y0), min(h, b.y1)), slice(max(0, b.x0), min(w, b.x1)))
+        return (slice(min(h, max(0, b.y0)), max(0, min(h, b.y1))),
+                slice(min(w, max(0, b.x0)), max(0, min(w, b.x1))))
