@@ -123,10 +123,18 @@ def _vllm_engine(model: str):
     os.environ.setdefault("VLLM_USE_FLASHINFER_SAMPLER", "0")
     # MinerU's no-repeat-ngram processor is what its own vLLM pipeline uses
     # to stop the model looping on dense text.
+    #
+    # Prefix caching is off: with it on, layout detection on a page whose
+    # prompt was already cached comes out different from the cold run, and
+    # sometimes broken (a NewsBench page went from 203 blocks to 681 on every
+    # cached repeat, its score from 0.91 to 0.52). Off, repeats are identical
+    # to the cold run. Batch pages are distinct images, so caching saved
+    # little anyway.
     return LLM(
         model=model,
         gpu_memory_utilization=memory,
         logits_processors=[MinerULogitsProcessor],
+        enable_prefix_caching=False,
     )
 
 
