@@ -207,3 +207,26 @@ def test_recovered_strip_inserted_into_detector_order():
 
     unordered = RegionRepair(rec).repair(_layout(regions()))
     assert _texts(unordered) == ["aaaa eeee", "bbbb ffff", "gggg", "cccc"]
+
+
+# ---------------------------------------------------------------------------
+# drop_duplicate_regions (the pipeline's default dedup)
+# ---------------------------------------------------------------------------
+
+def test_drop_duplicate_regions_removes_a_contained_reread():
+    from newspaper_ocr.region_repair import drop_duplicate_regions
+
+    story = "The 1962-63 edition of the Yackety Yack will be distributed Friday."
+    layout = _layout([_r(0, 0, 400, 600, story + " ID cards are needed."),
+                      _r(10, 10, 390, 200, story)], ordered=True)
+    out = drop_duplicate_regions(layout)
+    assert _texts(out) == [story + " ID cards are needed."]
+    assert out.ordered and len(layout.regions) == 2  # input untouched
+
+
+def test_drop_duplicate_regions_keeps_distinct_overlapping_text():
+    from newspaper_ocr.region_repair import drop_duplicate_regions
+
+    layout = _layout([_r(0, 0, 400, 600, "A headline about the honor council."),
+                      _r(10, 10, 390, 200, "Classified: room for rent, call 929-0000.")])
+    assert len(drop_duplicate_regions(layout).regions) == 2

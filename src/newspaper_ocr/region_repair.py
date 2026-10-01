@@ -70,6 +70,23 @@ def _toks(s: str) -> set[str]:
     return set(re.findall(r"[a-z]{4,}", (s or "").lower()))
 
 
+def drop_duplicate_regions(layout: PageLayout) -> PageLayout:
+    """Remove regions that re-read text another region already has.
+
+    Runs only :class:`RegionRepair`'s lossless dedup pass (no re-OCR): a region
+    goes when its box nearly matches another's (IoU >= 0.6; any words unique to
+    it are folded into the kept read) or when it sits inside another region
+    and its text is a substring of that region's.  MinerU2.5 occasionally emits
+    a page's layout as overlapping boxes over the same text — which pages tip
+    into it depends on the GPU — and every overlapping box is then read; this
+    is what keeps those pages from coming out with paragraphs printed twice.
+    Returns a new layout; *layout* is untouched.
+    """
+    regions = [dataclasses.replace(r) for r in layout.regions]
+    kept = RegionRepair()._dedup(regions)
+    return dataclasses.replace(layout, regions=kept)
+
+
 class RegionRepair:
     def __init__(
         self,
