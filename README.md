@@ -36,10 +36,10 @@ pip install newspaper-ocr
 #   macOS: brew install tesseract
 #   Ubuntu: apt install tesseract-ocr
 
-# Best accuracy (CUDA GPU): MinerU2.5 + DocLayout-YOLO hole fill
+# Linux + CUDA GPU (best accuracy): MinerU2.5 + DocLayout-YOLO hole fill
 pip install "newspaper-ocr[mineru,doclayout]"
 
-# Best without MinerU (also runs on a Mac): DocLayout-YOLO + a region VLM
+# Mac / local (lowest memory): DocLayout-YOLO + GLM-OCR
 pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector
 pip install "newspaper-ocr[glm-ocr]"      # GLM-OCR vision-language model
 
@@ -67,10 +67,10 @@ from newspaper_ocr import Pipeline
 pipe = Pipeline()
 text = pipe.ocr("page.jp2")
 
-# Best accuracy (CUDA GPU): MinerU2.5 reads the page, DocLayout-YOLO fills its holes
+# Linux + CUDA GPU (best accuracy): MinerU2.5 reads the page, DocLayout-YOLO fills its holes
 pipe = Pipeline(detector="mineru", hole_fill_detector="doclayout_yolo", recognizer="mineru")
 
-# Best without MinerU: DocLayout-YOLO + a region VLM
+# Mac / local (lowest memory): DocLayout-YOLO + GLM-OCR
 pipe = Pipeline(recognizer="glm-ocr")     # detector="auto" -> doclayout_yolo
 
 # Multi-page PDF: one result per page
@@ -90,9 +90,9 @@ results = pipe.ocr_batch(["page1.jp2", "page2.jp2", "page3.jp2"])
 
 ```bash
 newspaper-ocr page.jp2                                     # basic OCR
-newspaper-ocr page.jp2 --backend glm-ocr --output json    # DocLayout + GLM-OCR, JSON
+newspaper-ocr page.jp2 --backend glm-ocr --output json    # Mac/local: DocLayout + GLM-OCR, JSON
 newspaper-ocr page.jp2 --detector mineru --hole-fill-detector doclayout_yolo \
-    --backend mineru                                       # best accuracy (CUDA GPU)
+    --backend mineru                                       # Linux + CUDA: best accuracy
 newspaper-ocr page.jp2 --model news_combo_fast            # bundled fine-tuned model
 newspaper-ocr *.jp2 --outdir results/ --output text       # batch to files
 newspaper-ocr issue.pdf --outdir results/                 # multi-page PDF, one file per page
@@ -141,8 +141,8 @@ DocLayout needs no residual to reach the top.
 
 Practical guidance:
 
-- **Best accuracy:** MinerU2.5 with DocLayout-YOLO filling its holes (0.974; needs a CUDA GPU) — see [below](#best-result-mineru--doclayout-hole-fill-0974-local-free).
-- **Best accuracy without MinerU:** `detector="auto"` (→ DocLayout-YOLO) + a region VLM (`glm-ocr` or `paddleocr-vl`).
+- **Linux + CUDA GPU (best accuracy):** MinerU2.5 with DocLayout-YOLO filling its holes (0.974) — see [below](#best-result-mineru--doclayout-hole-fill-0974-local-free).
+- **Mac / local (lowest memory):** `detector="auto"` (→ DocLayout-YOLO) + `glm-ocr` (0.959). On a CUDA box without MinerU, `paddleocr-vl` scores a bit higher (0.970).
 - **Cheapest hosted:** PaddleX + Gemini-flash-lite reaches 0.936 at ~$4.51/100 pages.
 - **Free / fully local / no GPU:** DocLayout-YOLO + Tesseract still reaches 0.919.
 - **Avoid** the whole-page (no-detector) path on dense pages — layout is the bottleneck.
