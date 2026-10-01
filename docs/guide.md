@@ -18,6 +18,18 @@ pages = pipe.ocr_pdf("issue.pdf")
 pages = pipe.ocr_pdf("industrial-worker-1912.pdf", rotate=90)
 ```
 
+From the command line, pass the PDF like any image. Each page is written to
+`<stem>_p001.txt`, `<stem>_p002.txt`, … under `--outdir` (or printed in order,
+with a page header on stderr):
+
+```bash
+newspaper-ocr issue.pdf --outdir results/ --output json
+newspaper-ocr industrial-worker-1912.pdf --rotate 90 --pages 1-3,7 --outdir results/
+```
+
+`--pages` is 1-based; `--dpi` sets the render resolution for pages with no
+embedded scan.
+
 Requires: `pip install "newspaper-ocr[pdf]"`
 
 Each page is taken from its **largest embedded image**, not the first one. Pages

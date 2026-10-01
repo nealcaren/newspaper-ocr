@@ -38,7 +38,13 @@ import click
               help="Disable the residual second pass (on by default for region recognizers)")
 @click.option("--outdir", default=None,
               help="Output directory (default: stdout)")
-def main(images, backend, detector, hole_fill_detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, no_residual, outdir):
+@click.option("--rotate", default=0, type=click.Choice(["0", "90", "180", "270"]),
+              help="PDF input: rotate each page clockwise before layout detection")
+@click.option("--pages", "page_spec", default=None,
+              help="PDF input: 1-based pages to read, e.g. 1-3,7 (default: all)")
+@click.option("--dpi", default=300, type=int,
+              help="PDF input: render resolution for pages with no embedded scan")
+def main(images, backend, detector, hole_fill_detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, no_residual, outdir, rotate, page_spec, dpi):
     """OCR historical newspaper scans.
 
     Examples:
@@ -46,7 +52,13 @@ def main(images, backend, detector, hole_fill_detector, output, model, model_dir
       newspaper-ocr page.jp2 --backend tesserocr --output json
       newspaper-ocr *.jp2 --outdir results/ --output text
       newspaper-ocr page.jp2 --model news_gold_v2.traineddata
+      newspaper-ocr issue.pdf --outdir results/   # one file per page
+
+    PDF inputs (needs newspaper-ocr[pdf]) are read page by page; with --outdir
+    each page is saved as <stem>_p001.txt, <stem>_p002.txt, ...
     """
+    pages = _parse_pages(page_spec) if page_spec else None
+
     from newspaper_ocr import Pipeline
 
     # Build recognizer with mode
@@ -81,15 +93,59 @@ def main(images, backend, detector, hole_fill_detector, output, model, model_dir
     )
 
     for image_path in images:
-        result = pipe.ocr(image_path)
+        if Path(image_path).suffix.lower() == ".pdf":
+            from newspaper_ocr.pdf import page_images
 
-        if outdir:
-            out_path = Path(outdir) / (Path(image_path).stem + _ext(output))
-            Path(outdir).mkdir(parents=True, exist_ok=True)
-            out_path.write_text(result)
-            click.echo(f"Saved: {out_path}", err=True)
+            count = _pdf_page_count(image_path)
+            numbers = range(count) if pages is None else pages
+            if any(n >= count for n in numbers):
+                raise click.BadParameter(
+                    f"{Path(image_path).name} has only {count} pages",
+                    param_hint="--pages")
+            images_iter = page_images(image_path, dpi=dpi, rotate=int(rotate),
+                                      pages=numbers)
+            for number, image in zip(numbers, images_iter):
+                stem = f"{Path(image_path).stem}_p{number + 1:03d}"
+                if not outdir:
+                    click.echo(f"=== {Path(image_path).name} page {number + 1} ===",
+                               err=True)
+                _emit(pipe.run(image), stem, output, outdir)
         else:
-            click.echo(result)
+            _emit(pipe.ocr(image_path), Path(image_path).stem, output, outdir)
+
+
+def _emit(result: str, stem: str, fmt: str, outdir: str | None) -> None:
+    if outdir:
+        out_path = Path(outdir) / (stem + _ext(fmt))
+        Path(outdir).mkdir(parents=True, exist_ok=True)
+        out_path.write_text(result)
+        click.echo(f"Saved: {out_path}", err=True)
+    else:
+        click.echo(result)
+
+
+def _pdf_page_count(path: str) -> int:
+    from newspaper_ocr.pdf import _require_pymupdf
+
+    with _require_pymupdf().open(path) as doc:
+        return doc.page_count
+
+
+def _parse_pages(spec: str) -> list[int]:
+    """Turn a 1-based spec like ``1-3,7`` into zero-based page numbers."""
+    numbers: list[int] = []
+    try:
+        for part in spec.split(","):
+            first, dash, last = part.strip().partition("-")
+            start = int(first)
+            end = int(last) if dash else start
+            if start < 1 or end < start:
+                raise ValueError
+            numbers.extend(range(start - 1, end))
+    except ValueError:
+        raise click.BadParameter(f"invalid page spec {spec!r}; use e.g. 1-3,7",
+                                 param_hint="--pages")
+    return numbers
 
 
 def _ext(fmt: str) -> str:

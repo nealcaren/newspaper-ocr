@@ -12,10 +12,11 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
           │ Detection            │   │ Recognition          │   │ Text Cleaning        │
           │ (AS YOLO,            │   │ (Tesseract,          │   │ (dehyphenation,      │
 Image ──→ │  DocLayout-YOLO,     │──→│  tesserocr, Kraken,  │──→│  line joining)       │──→ Output
-JP2/JPG/  │  PP-DocLayout)       │   │  TrOCR, GLM-OCR,     │   │                      │    text
-PNG/PDF   │                      │   │  LightOnOCR,         │   │ Spell Check          │    json
-          │ Layout Proc.         │   │  PaddleOCR-VL,       │   │ (SymSpell)           │    hOCR
-          │ (reading order,      │   │  EffOCR)             │   │                      │    viewer
+JP2/JPG/  │  PP-DocLayout,       │   │  TrOCR, GLM-OCR,     │   │                      │    text
+PNG/PDF   │  MinerU2.5;          │   │  LightOnOCR,         │   │ Spell Check          │    json
+          │  + hole fill)        │   │  PaddleOCR-VL,       │   │ (SymSpell)           │    hOCR
+          │ Layout Proc.         │   │  MinerU2.5, EffOCR,  │   │                      │    viewer
+          │ (reading order,      │   │  hosted VLMs)        │   │                      │
           │  dedup, merge)       │   │                      │   │                      │
           └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
@@ -35,14 +36,16 @@ pip install newspaper-ocr
 #   macOS: brew install tesseract
 #   Ubuntu: apt install tesseract-ocr
 
-# Recommended detector + a strong recognizer:
-pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector (best layout)
+# Best accuracy (CUDA GPU): MinerU2.5 + DocLayout-YOLO hole fill
+pip install "newspaper-ocr[mineru,doclayout]"
+
+# Best without MinerU (also runs on a Mac): DocLayout-YOLO + a region VLM
+pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector
 pip install "newspaper-ocr[glm-ocr]"      # GLM-OCR vision-language model
 
 # Other optional backends:
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 pip install "newspaper-ocr[paddleocr-vl]" # PaddleOCR-VL VLM
-pip install "newspaper-ocr[mineru]"       # MinerU2.5 detector + recognizer (CUDA GPU)
 pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
 pip install "newspaper-ocr[trocr]"        # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"   # LightOnOCR (GPU required)
@@ -64,8 +67,14 @@ from newspaper_ocr import Pipeline
 pipe = Pipeline()
 text = pipe.ocr("page.jp2")
 
-# Recommended for accuracy: DocLayout-YOLO + a region VLM
+# Best accuracy (CUDA GPU): MinerU2.5 reads the page, DocLayout-YOLO fills its holes
+pipe = Pipeline(detector="mineru", hole_fill_detector="doclayout_yolo", recognizer="mineru")
+
+# Best without MinerU: DocLayout-YOLO + a region VLM
 pipe = Pipeline(recognizer="glm-ocr")     # detector="auto" -> doclayout_yolo
+
+# Multi-page PDF: one result per page
+pages = pipe.ocr_pdf("issue.pdf")
 
 # Bundled fine-tuned Tesseract model (free, fully local)
 pipe = Pipeline(recognizer="tesseract", recognizer_model="news_combo_fast")
@@ -82,8 +91,11 @@ results = pipe.ocr_batch(["page1.jp2", "page2.jp2", "page3.jp2"])
 ```bash
 newspaper-ocr page.jp2                                     # basic OCR
 newspaper-ocr page.jp2 --backend glm-ocr --output json    # DocLayout + GLM-OCR, JSON
+newspaper-ocr page.jp2 --detector mineru --hole-fill-detector doclayout_yolo \
+    --backend mineru                                       # best accuracy (CUDA GPU)
 newspaper-ocr page.jp2 --model news_combo_fast            # bundled fine-tuned model
 newspaper-ocr *.jp2 --outdir results/ --output text       # batch to files
+newspaper-ocr issue.pdf --outdir results/                 # multi-page PDF, one file per page
 ```
 
 See the **[detailed guide](docs/guide.md)** for PDF input, every detector and
