@@ -242,3 +242,32 @@ def test_fallback_threshold_boundary():
     result = pipe.run(_make_img())
     assert "exact" in result
     assert fallback.call_count == 0
+
+
+class MarkupRecognizer(RegionRecognizer):
+    def recognize(self, region):
+        region.text = "<table><tr><td>A</td><td>1</td></tr></table>"
+        return region
+
+
+def _markup_pipeline(**kwargs):
+    return Pipeline(
+        detector=MockDetector(), recognizer=MarkupRecognizer(),
+        output=MockFormatter(), layout_processing=False, residual_ocr=False, **kwargs,
+    )
+
+
+def test_markup_stripped_by_default():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    assert _markup_pipeline().run(img) == "A\t1"
+
+
+def test_markup_raw_keeps_model_output():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    assert "<td>" in _markup_pipeline(markup="raw").run(img)
+
+
+def test_markup_rejects_unknown_mode():
+    import pytest
+    with pytest.raises(ValueError):
+        _markup_pipeline(markup="html")

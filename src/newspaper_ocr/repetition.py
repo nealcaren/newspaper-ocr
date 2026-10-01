@@ -12,6 +12,8 @@ immaterial next to the VLM call that produced the text.
 """
 from __future__ import annotations
 
+from newspaper_ocr.markup import strip_html
+
 # Production defaults (ocr_pipeline.py, tag 2025-03-07-col-fix).
 MIN_LEN = 20
 MIN_REPS = 5
@@ -46,7 +48,11 @@ def has_repetition(
     shorter than ``min_len`` is undercounted.  That's production's behaviour too,
     and it's the conservative direction: a real loop of a short phrase still
     repeats far more than ``min_reps`` times before it trips the detector.
+
+    HTML is stripped first: a table repeats ``</td><td>`` on every cell,
+    which would otherwise flag every box score as a loop.
     """
+    text = strip_html(text)
     if len(text) < min_len * min_reps:
         return False
     # Short-circuit on the first qualifying window rather than scanning for the

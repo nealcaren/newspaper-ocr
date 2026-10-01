@@ -448,6 +448,28 @@ Reconstructs continuous text from OCR'd lines:
 
 Disable with `text_cleaning=False` or `--no-text-cleaning`.
 
+### Markup Cleanup
+
+Document VLMs answer in the markup they were trained on — MinerU2.5 especially.
+By default (`markup="plain"`) it is stripped to newspaper text:
+
+| Model output | Plain text |
+|:---|:---|
+| `<table><tr><td>Haner</td><td>5</td><td>1-2</td>…` | one line per row, cells tab-separated: `Haner⇥5⇥1-2…` |
+| `Made \(\$ 25,000\)in Three Months` | `Made $25,000 in Three Months` |
+| `a subscription of \(500 presented` (a `$` misread as math) | `a subscription of $500 presented` |
+| `the floor \(4^{12}\) hours`, `\(\frac{1}{2}\)` | `4½ hours`, `½` |
+| `Dennis Rash  ⏎Receive…`, `## Head`, `**Bold**` | hard break, heading and bold markers removed |
+
+Text without markup passes through unchanged (`<` in prose, `$2 fee`, single-`*`
+asterisks). Pass `markup="raw"` or `--markup raw` to keep the model's HTML,
+LaTeX and Markdown — e.g. to render tables. The repetition detector always
+looks at tag-free text, so a table's repeated `</td><td>` is never mistaken for
+a generation loop.
+
+LaTeX in a newspaper scan is nearly always the model hallucinating on a stamp or
+ornament; cleanup flattens it but cannot tell it was invented.
+
 ### Spell Correction
 
 Optional SymSpell-based correction (`spell_check=True`):

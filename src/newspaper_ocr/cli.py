@@ -36,6 +36,9 @@ import click
               help="Confidence threshold (0-100) below which fallback is used (default: 70)")
 @click.option("--no-residual", is_flag=True,
               help="Disable the residual second pass (on by default for region recognizers)")
+@click.option("--markup", default="plain", type=click.Choice(["plain", "raw"]),
+              help="plain (default): strip HTML tables, LaTeX and Markdown from "
+                   "VLM output; raw: keep the model's markup")
 @click.option("--outdir", default=None,
               help="Output directory (default: stdout)")
 @click.option("--rotate", default=0, type=click.Choice(["0", "90", "180", "270"]),
@@ -44,7 +47,7 @@ import click
               help="PDF input: 1-based pages to read, e.g. 1-3,7 (default: all)")
 @click.option("--dpi", default=300, type=int,
               help="PDF input: render resolution for pages with no embedded scan")
-def main(images, backend, detector, hole_fill_detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, no_residual, outdir, rotate, page_spec, dpi):
+def main(images, backend, detector, hole_fill_detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, no_residual, markup, outdir, rotate, page_spec, dpi):
     """OCR historical newspaper scans.
 
     Examples:
@@ -90,6 +93,7 @@ def main(images, backend, detector, hole_fill_detector, output, model, model_dir
         fallback=fallback,
         fallback_threshold=fallback_threshold,
         residual_ocr=False if no_residual else "auto",
+        markup=markup,
     )
 
     for image_path in images:

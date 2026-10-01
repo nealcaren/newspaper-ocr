@@ -96,6 +96,7 @@ newspaper-ocr page.jp2 --detector mineru --hole-fill-detector doclayout_yolo \
 newspaper-ocr page.jp2 --model news_combo_fast            # bundled fine-tuned model
 newspaper-ocr *.jp2 --outdir results/ --output text       # batch to files
 newspaper-ocr issue.pdf --outdir results/                 # multi-page PDF, one file per page
+newspaper-ocr page.jp2 --backend mineru --markup raw      # keep VLM HTML tables/LaTeX (default: plain text)
 ```
 
 See the **[detailed guide](docs/guide.md)** for PDF input, every detector and
