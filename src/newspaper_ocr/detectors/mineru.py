@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from newspaper_ocr import _mineru
+from newspaper_ocr import _device, _mineru
 from newspaper_ocr.detectors.base import Detector
 from newspaper_ocr.models import BBox, PageLayout, Region
 
@@ -29,12 +29,20 @@ class MineruDetector(Detector):
                  device: str | None = None, **kwargs):
         # model_dir / skip_lines are passed by Pipeline for every detector;
         # MinerU is region-only and uses the Hugging Face cache.
-        self.client = _mineru.get_client(model, device)
+        self.device = device or _mineru.default_device()
+        self.client = _mineru.get_client(model, self.device)
 
     def detect(self, image: Image.Image) -> PageLayout:
         w, h = image.size
+        try:
+            blocks = self.client.layout_detect(image)
+        except Exception as exc:
+            if _device.is_oom(exc):
+                _device.free_cache(self.device)
+                raise MemoryError(_device.OOM_HINT) from exc
+            raise
         regions: list[Region] = []
-        for block in self.client.layout_detect(image):
+        for block in blocks:
             nx0, ny0, nx1, ny1 = block.bbox
             x0, y0 = max(0, round(nx0 * w)), max(0, round(ny0 * h))
             x1, y1 = min(w, round(nx1 * w)), min(h, round(ny1 * h))

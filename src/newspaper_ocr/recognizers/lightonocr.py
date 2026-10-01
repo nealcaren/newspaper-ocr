@@ -54,7 +54,8 @@ class LightOnOcrRecognizer(RegionRecognizer):
             else:
                 device = "cpu"
 
-        self.device = device
+        from newspaper_ocr._device import prepare_device
+        self.device = prepare_device(device)
         self.max_new_tokens = max_new_tokens
         self.repetition_min_len = repetition_min_len
         self.repetition_min_reps = repetition_min_reps

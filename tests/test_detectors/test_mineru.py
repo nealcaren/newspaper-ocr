@@ -14,19 +14,27 @@ from newspaper_ocr.models import BBox, Region  # noqa: E402
 
 
 class FakeClient:
-    def __init__(self, blocks=(), texts=None, fail=False):
+    def __init__(self, blocks=(), texts=None, fail=False, oom_over=None,
+                 fail_types=(), layout_exc=None):
         self.blocks = [SimpleNamespace(type=t, bbox=b) for t, b in blocks]
         self.texts = texts
         self.fail = fail
+        self.oom_over = oom_over
+        self.fail_types = set(fail_types)
+        self.layout_exc = layout_exc
         self.calls = []
 
     def layout_detect(self, image):
+        if self.layout_exc:
+            raise self.layout_exc
         return self.blocks
 
     def batch_content_extract(self, images, types):
         self.calls.append((len(images), list(types)))
-        if self.fail:
+        if self.fail or self.fail_types & set(types):
             raise RuntimeError("boom")
+        if self.oom_over is not None and len(images) > self.oom_over:
+            raise RuntimeError("MPS backend out of memory")
         return self.texts or [f"{t}-{i}" for i, t in enumerate(types)]
 
 
@@ -89,3 +97,27 @@ def test_recognizer_marks_errors_and_repetition(fake):
     fake(FakeClient(texts=[loop]))
     r = MineruRecognizer().recognize(_region("text"))
     assert r.status == "repetition" and len(r.text) < len(loop)
+
+
+def test_recognizer_retries_one_by_one_after_batch_failure(fake):
+    from newspaper_ocr.recognizers.mineru import MineruRecognizer
+
+    client = fake(FakeClient(oom_over=1, fail_types={"table"}))
+    regions = [_region("text"), _region("table"), _region("title")]
+    out = MineruRecognizer().recognize_regions(None, regions)
+    assert client.calls[0] == (3, ["text", "table", "title"])
+    assert [len(types) for _, types in client.calls[1:]] == [1, 1, 1]
+    assert [r.status for r in out] == ["ok", "error", "ok"]
+    assert out[0].text and out[2].text and out[1].text == ""
+
+
+def test_detector_turns_oom_into_actionable_memory_error(fake):
+    from newspaper_ocr.detectors.mineru import MineruDetector
+
+    fake(FakeClient(layout_exc=RuntimeError("MPS backend out of memory (MPS allocated: 8 GB)")))
+    with pytest.raises(MemoryError, match="NEWSPAPER_OCR_MPS_MEMORY_FRACTION"):
+        MineruDetector().detect(Image.new("RGB", (50, 50)))
+
+    fake(FakeClient(layout_exc=ValueError("bad output")))
+    with pytest.raises(ValueError):
+        MineruDetector().detect(Image.new("RGB", (50, 50)))

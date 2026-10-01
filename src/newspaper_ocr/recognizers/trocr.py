@@ -47,7 +47,8 @@ class TrOCRRecognizer(LineRecognizer):
             else:
                 device = "cpu"
 
-        self.device = device
+        from newspaper_ocr._device import prepare_device
+        self.device = prepare_device(device)
         self._torch = torch
 
         self._processor = TrOCRProcessor.from_pretrained(model_id)

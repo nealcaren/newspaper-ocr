@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from PIL import Image
 
-from newspaper_ocr import _mineru, repetition
+from newspaper_ocr import _device, _mineru, repetition
 from newspaper_ocr.models import Region
 from newspaper_ocr.recognizers.base import RegionRecognizer
 
 # MinerU block types it never sends to the model on its own pages: containers
 # (whose children are read instead) and pictures.
 _SKIP_TYPES = {"image", "chart", "list", "equation_block", "image_block"}
+
+_FAILED = object()
 
 
 class MineruRecognizer(RegionRecognizer):
@@ -37,7 +39,8 @@ class MineruRecognizer(RegionRecognizer):
         repetition_min_reps: int = repetition.MIN_REPS,
         **kwargs,
     ):
-        self.client = _mineru.get_client(model, device)
+        self.device = device or _mineru.default_device()
+        self.client = _mineru.get_client(model, self.device)
         self.repetition_min_len = repetition_min_len
         self.repetition_min_reps = repetition_min_reps
         from mineru_vl_utils.structs import BLOCK_TYPES
@@ -60,17 +63,28 @@ class MineruRecognizer(RegionRecognizer):
                 r.text, r.status = "", "ok"
         if not todo:
             return regions
+
         try:
-            results = self.client.batch_content_extract(
-                [r.image.convert("RGB") for r in todo],
-                [self._block_type(r.label) for r in todo],
-            )
+            results = self._extract(todo)
         except Exception:
+            # One bad crop (often an out-of-memory on a huge region) shouldn't
+            # sink the page: retry one region at a time and mark only the
+            # failures, which the pipeline's fallback ladder can then pick up.
+            _device.free_cache(self.device)
+            results = []
             for r in todo:
-                r.text, r.status = "", "error"
-            return regions
+                try:
+                    results.extend(self._extract([r]))
+                except Exception:
+                    _device.free_cache(self.device)
+                    results.append(_FAILED)
+        finally:
+            _device.free_cache(self.device)
 
         for r, res in zip(todo, results):
+            if res is _FAILED:
+                r.text, r.status = "", "error"
+                continue
             text = (str(res) if res is not None else "").strip()
             if repetition.has_repetition(
                 text, self.repetition_min_len, self.repetition_min_reps
@@ -80,3 +94,9 @@ class MineruRecognizer(RegionRecognizer):
             else:
                 r.text, r.status = text, "ok"
         return regions
+
+    def _extract(self, regions: list[Region]) -> list:
+        return self.client.batch_content_extract(
+            [r.image.convert("RGB") for r in regions],
+            [self._block_type(r.label) for r in regions],
+        )

@@ -43,7 +43,9 @@ def get_client(model: str = DEFAULT_MODEL, device: str | None = None, **client_k
             '  pip install "newspaper-ocr[mineru]"'
         )
 
-    device = device or default_device()
+    from newspaper_ocr._device import prepare_device
+
+    device = prepare_device(device or default_device())
     key = (model, device)
     if key not in _CLIENTS:
         on_cuda = device.startswith("cuda")
