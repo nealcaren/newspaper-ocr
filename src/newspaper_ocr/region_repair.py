@@ -30,6 +30,7 @@ Passes
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 from newspaper_ocr.models import BBox, PageLayout, Region
 from newspaper_ocr.recognizers.base import RegionRecognizer
@@ -105,16 +106,26 @@ class RegionRepair:
     # -- public entry -----------------------------------------------------------
     def repair(self, layout: PageLayout) -> PageLayout:
         self.actions = []
-        regions = list(layout.regions)
+        # Work on copies: the dedup fold and the id renumbering write to regions,
+        # and the caller's layout must come back untouched.
+        regions = [dataclasses.replace(r) for r in layout.regions]
         regions = self._dedup(regions)
+        before = {id(r) for r in regions}
         regions = self._split_containers(regions, layout.image)
+        if layout.ordered:
+            # Keep the detector's reading order; slot recovered strips into it
+            # instead of leaving them appended at the end.
+            from newspaper_ocr.layout_processor import insert_in_order
+            regions = insert_in_order([r for r in regions if id(r) in before],
+                                      [r for r in regions if id(r) not in before])
         regions = self._merge_fragments(regions, layout.image,
                                         layout.width, layout.height)
         for i, r in enumerate(regions):
             r.id = f"r{i}"
         return PageLayout(image=layout.image, regions=regions,
                           width=layout.width, height=layout.height,
-                          lines_detected=layout.lines_detected)
+                          lines_detected=layout.lines_detected,
+                          ordered=layout.ordered)
 
     # -- pass 1: lossless dedup -------------------------------------------------
     def _dedup(self, regions: list[Region]) -> list[Region]:
