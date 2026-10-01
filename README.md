@@ -230,8 +230,19 @@ Holes are recognized with MinerU because they are isolated blocks in its comfort
 zone; feeding it DocLayout's coarse *columns* makes it duplicate text, so without
 MinerU's own boxes, use a region-native recognizer (GLM-OCR / PaddleOCR-VL). Any
 two detectors can be combined this way (`hole_fill_detector=`); see the
-[guide](docs/guide.md#combining-detectors-hole-fill). MinerU needs a CUDA GPU
-(~30–80 s/page on an L40S); on a Mac it is impractically slow.
+[guide](docs/guide.md#combining-detectors-hole-fill). MinerU needs a CUDA GPU;
+on a Mac it is impractically slow.
+
+**On vLLM it is ~20× faster at the same accuracy.** `pip install
+"newspaper-ocr[mineru,mineru-vllm,doclayout]"` and use the `mineru-vllm` detector and
+recognizer: ~8 s/page on an L40S instead of ~80 s (and no 30-minute repetition
+loops), scoring 0.973 on NewsBench vs 0.974. See
+[Running at scale](docs/guide.md#running-at-scale) for batch runs and Slurm.
+
+```bash
+newspaper-ocr issue.pdf --detector mineru-vllm --hole-fill-detector doclayout_yolo \
+    --backend mineru-vllm --outdir results/
+```
 
 See [docs/error-analysis.md](docs/error-analysis.md) for where the top configs
 still miss or over-transcribe, cropped from the scans.
