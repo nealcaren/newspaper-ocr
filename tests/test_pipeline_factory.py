@@ -110,3 +110,25 @@ def test_region_recognizer_batch_hook_reads_page_once():
     layout = pipe.analyze(Image.new("RGB", (50, 50), "white"))
     assert Batched.calls == 1
     assert [r.text for r in layout.regions] == ["t0", "t1"]
+
+
+@pytest.mark.parametrize("residual_ocr, ordered, expect_run", [
+    ("auto", False, True),
+    ("auto", True, False),   # detector-supplied order: auto skips residual
+    (True, True, True),      # explicit True still forces it
+])
+def test_residual_auto_skips_ordered_layouts(residual_ocr, ordered, expect_run):
+    from PIL import Image
+    from newspaper_ocr.detectors.base import Detector
+    from newspaper_ocr.models import PageLayout
+
+    class Empty(Detector):
+        def detect(self, image):
+            return PageLayout(image=image, width=50, height=50, ordered=ordered)
+
+    pipe = Pipeline(detector=Empty(), recognizer=lambda img: "",
+                    residual_ocr=residual_ocr)
+    ran = []
+    pipe.residual.recover = lambda layout: ran.append(1) or layout
+    pipe.analyze(Image.new("RGB", (50, 50), "white"))
+    assert bool(ran) == expect_run

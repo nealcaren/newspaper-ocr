@@ -45,6 +45,14 @@ def get_client(model: str = DEFAULT_MODEL, device: str | None = None, **client_k
 
     from newspaper_ocr._device import prepare_device
 
+    # mineru_vl_utils logs every page's raw layout output at DEBUG through
+    # loguru, which prints by default; silence it unless MinerU's own debug
+    # switch is on.
+    import os
+    from loguru import logger
+    if not os.environ.get("MINERU_VL_DEBUG_ENABLE"):
+        logger.disable("mineru_vl_utils")
+
     device = prepare_device(device or default_device())
     key = (model, device)
     if key not in _CLIENTS:
