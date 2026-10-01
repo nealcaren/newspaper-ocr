@@ -42,6 +42,7 @@ pip install "newspaper-ocr[glm-ocr]"      # GLM-OCR vision-language model
 # Other optional backends:
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 pip install "newspaper-ocr[paddleocr-vl]" # PaddleOCR-VL VLM
+pip install "newspaper-ocr[mineru]"       # MinerU2.5 detector + recognizer (CUDA GPU)
 pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
 pip install "newspaper-ocr[trocr]"        # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"   # LightOnOCR (GPU required)
@@ -98,7 +99,9 @@ is real API spend ($0 = local). Higher is better.
 
 | Detector | Recognizer | newspaper-ocr | overall | cased | bowF1 | $/100pg |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|
-| **DocLayout-YOLO** | PaddleOCR-VL | 0.8.1 | **0.970** | **0.953** | 0.985 | $0.00 |
+| **MinerU2.5 + DocLayout holes** | MinerU2.5 | 0.9.0 | **0.974** | **0.957** | 0.985 | $0.00 |
+| **DocLayout-YOLO** | PaddleOCR-VL | 0.8.1 | 0.970 | 0.953 | 0.985 | $0.00 |
+| MinerU2.5 | MinerU2.5 | 0.9.0 | 0.966 | 0.950 | 0.981 | $0.00 |
 | **DocLayout-YOLO** | GLM-OCR | 0.8.1 | 0.959 | 0.943 | 0.985 | $0.00 |
 | PaddleX | GLM-OCR | 0.7.0 | 0.937 | 0.922 | 0.980 | $0.00 |
 | PaddleX | Gemini-flash-lite | 0.7.0 | 0.936 | 0.915 | 0.944 | $4.51 |
@@ -126,14 +129,99 @@ DocLayout needs no residual to reach the top.
 
 Practical guidance:
 
-- **Best accuracy:** `detector="auto"` (→ DocLayout-YOLO) + a region VLM (`glm-ocr` or `paddleocr-vl`).
+- **Best accuracy:** MinerU2.5 with DocLayout-YOLO filling its holes (0.974; needs a CUDA GPU) — see [below](#best-result-mineru--doclayout-hole-fill-0974-local-free).
+- **Best accuracy without MinerU:** `detector="auto"` (→ DocLayout-YOLO) + a region VLM (`glm-ocr` or `paddleocr-vl`).
 - **Cheapest hosted:** PaddleX + Gemini-flash-lite reaches 0.936 at ~$4.51/100 pages.
 - **Free / fully local / no GPU:** DocLayout-YOLO + Tesseract still reaches 0.919.
 - **Avoid** the whole-page (no-detector) path on dense pages — layout is the bottleneck.
 
-_(0.8.1 rows are the GPU matrix, all one environment; 0.6.0/0.7.0 rows are the
+_(0.8.1 and 0.9.0 rows are the GPU matrix (L40S); 0.6.0/0.7.0 rows are the
 earlier Mac/MLX + hosted-API runs. Full sheet with tokens/speed:_
 `python scoresheet.py` _in the [NewsBench](https://github.com/nealcaren/newsbench) repo.)_
+
+## Leaderboard OCR models on NewsBench
+
+Models that top general document-parsing leaderboards (e.g. OmniDocBench) do **not**
+automatically top NewsBench — dense, multi-column newspaper pages are a layout and
+reading-order problem, not just a character-recognition one. The dividing line is
+whether a system does layout analysis at all.
+
+**Hosted VLMs: the harness makes them; running whole-page breaks them.** The same
+model, given the raw full page in one call vs. run through our detect → region →
+reading-order harness (DocLayout-YOLO), n = 15:
+
+| Recognizer | whole page | + our harness | Δ | $/100pg |
+|:---|:---:|:---:|:---:|:---:|
+| gpt-5.6-luna | 0.503 | **0.975** | +0.47 | $4.68 |
+| gemini-3.5-flash-lite | 0.820 | 0.958 | +0.14 | $2.41 |
+| mistral-small-2603 | 0.202 | 0.958 | +0.76 | $0.82 |
+| deepseek-v4.1-flash | — | 0.957 | — | $3.47 |
+| glm-5.3-flash | — | 0.938 | — | $0.76 |
+| gemma-3-27b-it | 0.226 | 0.921 | +0.70 | $0.43 |
+
+Every model gains massively from the harness; the whole-page column is where
+capable VLMs go to fail on multi-column layouts.
+
+**End-to-end document models, whole-page** (no external harness), n = 15:
+
+| Model | overall | what it is |
+|:---|:---:|:---|
+| **MinerU2.5-1.2B** | **0.966** | full parsing **pipeline** — does its own layout + reading order |
+| dots.ocr (~3B) | 0.533 | bare OCR VLM |
+| OvisOCR2 (0.8B) | −0.230 | bare OCR VLM (over-generates ~2×) |
+| TeleOCR (~7B) | −0.322 | bare OCR VLM (repetition collapse) |
+
+The bare OCR VLMs — however high they rank on clean-document benchmarks — collapse
+on newspapers (0.53 down to *negative*, where per-page edit distance exceeds the
+gold length). **MinerU2.5 is the exception because it is a pipeline**: it runs its
+own layout and reading-order stage internally, so it reaches 0.966 — essentially
+tied with our harness (0.970). The lesson isn't "our recognizer wins," it's
+**layout handling is the whole game**: a raw model needs a layout pipeline — ours,
+or one built in — to read a full page. Our harness supplies that layer to *any*
+recognizer, from free Tesseract (0.919) to a hosted VLM (0.975).
+
+### Best result: MinerU + DocLayout hole fill (0.974, local, free)
+
+MinerU2.5 has the best reading order (gap 0.015) but drops ~2.7% of words in
+localized holes its layout misses; DocLayout-YOLO *covers* those holes. Since
+0.9.0 this combination is built in: **MinerU supplies the base regions and their
+reading order, DocLayout adds only the inked boxes MinerU missed, and MinerU reads
+everything**:
+
+```bash
+pip install "newspaper-ocr[mineru,doclayout]"
+newspaper-ocr page.jpg --detector mineru --hole-fill-detector doclayout_yolo --backend mineru
+```
+
+```python
+Pipeline(detector="mineru", hole_fill_detector="doclayout_yolo", recognizer="mineru")
+```
+
+n = 15:
+
+| System | overall | cased | bowF1 | miss% | $/100pg |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **MinerU + DocLayout holes** (0.9.0) | **0.974** | **0.957** | 0.985 | 1.6 | **$0.00** |
+| MinerU2.5 alone (0.9.0) | 0.966 | 0.950 | 0.981 | 2.7 | $0.00 |
+| DocLayout + PaddleOCR-VL (0.8.1) | 0.970 | 0.953 | 0.985 | 1.8 | $0.00 |
+| DocLayout + gpt-5.6-luna (hosted) | 0.975 | 0.951 | 0.951 | 3.6 | $4.68 |
+
+Hole fill is do-no-harm in practice: most pages get no holes and come through
+byte-identical to MinerU alone, while pages MinerU partly missed gain the most
+(one page goes 0.890 → 0.990). Duplicated and novel text stay flat. It matches the
+best *hosted* result while being **fully local and free**. (The out-of-library
+prototype scored 0.975; the 0.001 difference is one story-continuation block whose
+correct position the layout alone can't reveal.)
+
+Holes are recognized with MinerU because they are isolated blocks in its comfort
+zone; feeding it DocLayout's coarse *columns* makes it duplicate text, so without
+MinerU's own boxes, use a region-native recognizer (GLM-OCR / PaddleOCR-VL). Any
+two detectors can be combined this way (`hole_fill_detector=`); see the
+[guide](docs/guide.md#combining-detectors-hole-fill). MinerU needs a CUDA GPU
+(~30–80 s/page on an L40S); on a Mac it is impractically slow.
+
+See [docs/error-analysis.md](docs/error-analysis.md) for where the top configs
+still miss or over-transcribe, cropped from the scans.
 
 ## Architecture
 

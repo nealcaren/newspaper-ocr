@@ -46,7 +46,8 @@ for i, image in enumerate(page_images("issue.pdf", rotate=90)):
 
 ## Phase 1: Layout
 
-Three detection backends, plus battle-tested newspaper layout post-processing.
+Four detection backends, a way to combine two of them, plus battle-tested
+newspaper layout post-processing.
 
 ### Detectors
 
@@ -55,6 +56,7 @@ Three detection backends, plus battle-tested newspaper layout post-processing.
 | `doclayout_yolo` **(recommended)** | Regions only (10 categories) | varies | Newspapers/broadsheets; region-level OCR — best accuracy (DocLayout-YOLO, 1280px checkpoint) |
 | `paddlex` | Regions only (20 categories) | varies | Newspapers/broadsheets; region-level OCR, detailed layout analysis |
 | `as_yolo` | Regions + lines | ~8s/page | Line-level OCR (Tesseract, EffOCR) on simple layouts |
+| `mineru` | Regions, **in reading order** | varies (GPU) | MinerU2.5 layout; pair with `hole_fill_detector` and the `mineru` recognizer for the best NewsBench score. CUDA GPU; `[mineru]` extra |
 
 The default is **`detector="auto"`**, which prefers `doclayout_yolo` when it is
 installed, then `paddlex`, and otherwise falls back to `as_yolo` (with a warning).
@@ -68,6 +70,37 @@ The DocLayout-YOLO checkpoints are the official ones from the Hugging Face Hub �
 [`juliozhao/DocLayout-YOLO-DocStructBench-imgsz1280-2501`](https://huggingface.co/juliozhao/DocLayout-YOLO-DocStructBench-imgsz1280-2501)
 (default) and `juliozhao/DocLayout-YOLO-DocStructBench` (1024px) — downloaded and
 cached on first use.
+
+### Combining detectors (hole fill)
+
+`hole_fill_detector` adds a second detector that contributes only the **holes**
+the first one missed: boxes less than 15% covered by the primary's boxes (or by a
+hole already accepted) that contain at least 1.2% ink. Everything the primary
+found is kept as is, and each region's `source` records `primary` or `hole`.
+
+```python
+Pipeline(detector="mineru", hole_fill_detector="doclayout_yolo", recognizer="mineru")
+Pipeline(detector="paddlex", hole_fill_detector="doclayout_yolo", recognizer="glm-ocr")
+```
+
+On the CLI: `--hole-fill-detector doclayout_yolo`. With no hole-fill detector,
+output is identical to the primary alone. For finer control build the union
+yourself:
+
+```python
+from newspaper_ocr.detectors import UnionDetector
+UnionDetector(primary, secondary, overlap_max=0.15, ink_min=0.012,
+              ink_thresh=128,               # None = per-page Otsu threshold
+              exclude_labels={"abandon"})   # skip DocLayout's header/footer/noise class
+```
+
+**Reading order.** If the primary supplies its own reading order (MinerU does;
+the layout is marked `ordered`), layout post-processing keeps it — no re-sort,
+merge or gap fill — and each hole is inserted after its nearest predecessor in
+that order (the latest region above it in its span; a much wider block above,
+like a banner, starts a section instead). Row-by-row orders are detected and
+handled. Otherwise holes join the page and the usual reading-order sort places
+them.
 
 ### Layout Processing
 
@@ -114,10 +147,18 @@ Recognition backends with different speed/accuracy tradeoffs.
 | `glm-ocr` | region | ~300s | 1.7% | GLM-OCR VLM (~1.3B params), GPU recommended |
 | `lightonocr` | region | ~500s | **1.1%** | LightOnOCR-2-1B VLM, GPU required |
 | `paddleocr-vl` | region | varies | — | PaddleOCR-VL VLM (~0.96B params), GPU recommended; good fallback for regions another model failed on |
+| `mineru` | region | ~30–80s (L40S) | — | MinerU2.5 (1.2B), reads a page's regions in batches; MinerU block types keep their own prompts. CUDA GPU; `[mineru]` extra |
 | `effocr` | line | ~50s | 11.2% | Contrastive char/word matching, ONNX |
 | `openai` / `openrouter` | region | varies | — | Any OpenAI-compatible endpoint — bring your own hosted model |
 
 *CER measured on pre-1930 newspaper text at R2 (35%) resolution. Times on a single newspaper page (~1,100 lines).
+
+**Apple Silicon memory cap.** On a Mac the GPU shares system memory, so local
+models (MinerU, LightOnOCR, TrOCR) cap their GPU memory at half of macOS's
+recommended GPU working set. An oversized batch then fails with an out-of-memory
+error instead of pushing the whole machine into swap. Raise or remove the cap with
+`NEWSPAPER_OCR_MPS_MEMORY_FRACTION` (e.g. `0.8`, or `0` for no limit); an explicit
+`PYTORCH_MPS_HIGH_WATERMARK_RATIO` takes precedence.
 
 ### Bundled Fine-Tuned Model
 
@@ -343,6 +384,10 @@ Pipeline(recognizer="tesseract")                     # residual OFF (auto: line 
 Pipeline(recognizer="tesseract", residual_ocr=True)  # force on (uses recognize_region)
 ```
 
+As of 0.9.0, `"auto"` also skips pages whose detector supplies its own reading
+order (MinerU): its fine boxes leave little real residue, and on NewsBench the pass
+only added duplicates there (MinerU + DocLayout holes: 0.974 without, 0.966 with).
+
 `residual_ocr` accepts `"auto"` (default — on for region recognizers), `True`
 (force on for any region-capable recognizer), or `False`. On the CLI, region
 recognizers get it automatically; pass `--no-residual` to opt out.
@@ -430,6 +475,7 @@ article segmentation, LLM enrichment). Each region carries:
 | `text` | Recognized text |
 | `status` | `ok`, `timeout`, `repetition`, `error`, or `chunked_partial` |
 | `confidence` | Detection confidence |
+| `source` | `primary` or `hole` when detectors are combined (omitted otherwise) |
 | `lines` | Per-line `text` / `confidence` / `bbox`, when the recognizer is line-level |
 
 `status` is how a caller finds regions worth re-OCRing without re-reading the
