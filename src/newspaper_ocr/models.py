@@ -75,6 +75,10 @@ class Region:
     #: recognizer — e.g. the fallback recognizer's class name. Empty means the
     #: primary recognizer's result was kept.
     engine: str = ""
+    #: Which detector proposed the region when detectors are combined (see
+    #: :class:`~newspaper_ocr.detectors.union.UnionDetector`): ``"primary"`` or
+    #: ``"hole"``.  Empty for a single detector.
+    source: str = ""
 
 
 @dataclass
@@ -90,6 +94,11 @@ class PageLayout:
         or line detection skipped for speed).  Defaults to False so a detector
         has to opt in: the cost of not setting it is a false positive surviving,
         while the cost of wrongly setting it is deleting real text.
+    ordered : bool
+        Whether ``regions`` already arrive in reading order from the detector
+        (e.g. a VLM layout model with native ordering).  Layout post-processing
+        and the residual pass then keep that order — inserting any new regions
+        into it — instead of re-sorting, merging or gap-filling the page.
     """
 
     image: Image.Image
@@ -97,6 +106,7 @@ class PageLayout:
     width: int = 0
     height: int = 0
     lines_detected: bool = False
+    ordered: bool = False
 
     @property
     def text(self) -> str:

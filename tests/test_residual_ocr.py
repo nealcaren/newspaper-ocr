@@ -218,3 +218,22 @@ def test_converges_within_max_passes():
     passes = [a for a in resid.actions if a[0] == "pass"]
     assert len(passes) <= 3
     assert out is not None
+
+
+def test_ordered_layout_keeps_native_order():
+    """With detector-supplied order, pass-1 order survives (no re-sort) and the
+    recovered block is inserted, not sorted in."""
+    arr = _page()
+    _ink(arr, (40, 20, 560, 60))        # top strip, uncovered -> recovered
+    # Native order deliberately bottom-then-middle, which a sort would flip.
+    regions = [_region((40, 300, 560, 380), text="bottom"),
+               _region((40, 150, 560, 230), text="middle")]
+    layout = _layout(arr, regions)
+    layout.ordered = True
+
+    rec = FakeRecognizer(text="TOP")
+    out = ResidualOcr(rec, min_gain_ink=1.0).recover(layout)
+
+    assert out.ordered
+    texts = [r.text for r in out.regions]
+    assert texts == ["TOP", "bottom", "middle"]

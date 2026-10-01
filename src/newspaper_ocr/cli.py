@@ -13,6 +13,9 @@ import click
 @click.option("--detector", "-d", default="auto",
               help="Detection backend: auto (prefers paddlex, falls back to "
                    "as_yolo), paddlex, as_yolo")
+@click.option("--hole-fill-detector", default=None,
+              help="Second detector whose boxes fill inked holes the main "
+                   "detector missed (e.g. doclayout_yolo)")
 @click.option("--output", "-o", default="text",
               help="Output format: text, json, hocr")
 @click.option("--model", "-m", default=None,
@@ -35,7 +38,7 @@ import click
               help="Disable the residual second pass (on by default for region recognizers)")
 @click.option("--outdir", default=None,
               help="Output directory (default: stdout)")
-def main(images, backend, detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, no_residual, outdir):
+def main(images, backend, detector, hole_fill_detector, output, model, model_dir, mode, no_layout_processing, no_text_cleaning, spell_check, fallback, fallback_threshold, no_residual, outdir):
     """OCR historical newspaper scans.
 
     Examples:
@@ -65,6 +68,7 @@ def main(images, backend, detector, output, model, model_dir, mode, no_layout_pr
 
     pipe = Pipeline(
         detector=detector,
+        hole_fill_detector=hole_fill_detector,
         recognizer=recognizer,
         output=output,
         model_cache_dir=model_dir,

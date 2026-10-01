@@ -56,3 +56,24 @@ def test_pipeline_with_layout_processing_disabled():
     except (ImportError, KeyError, FileNotFoundError):
         pytest.skip("Required backends not available")
     assert not pipe.layout_processor.enabled
+
+
+def test_hole_fill_detector_wraps_primary_in_union():
+    from PIL import Image
+    from newspaper_ocr.detectors.base import Detector
+    from newspaper_ocr.detectors.union import UnionDetector
+    from newspaper_ocr.models import PageLayout
+
+    class Empty(Detector):
+        def detect(self, image):
+            return PageLayout(image=image, width=image.size[0], height=image.size[1])
+
+    primary, secondary = Empty(), Empty()
+    pipe = Pipeline(detector=primary, hole_fill_detector=secondary,
+                    recognizer=lambda img: "", residual_ocr=False)
+    assert isinstance(pipe.detector, UnionDetector)
+    assert pipe.detector.primary is primary and pipe.detector.secondary is secondary
+    assert pipe.analyze(Image.new("RGB", (50, 50), "white")).regions == []
+
+    assert Pipeline(detector=primary, recognizer=lambda img: "",
+                    residual_ocr=False).detector is primary

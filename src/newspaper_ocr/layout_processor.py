@@ -20,6 +20,11 @@ Pipeline stages (in order):
   6. _merge_adjacent   – merge vertically adjacent same-column text blocks
   7. _drop_empty_overlaps – drop OCR-label regions the line detector found
      nothing in (skipped when no line detection ran — see PageLayout.lines_detected)
+
+When the detector already supplies reading order (``PageLayout.ordered``), only
+the confidence filter/rescue and the empty-overlap drop run, in place: sorting,
+merging, gap-filling and dedup would all second-guess the detector's own blocks.
+New regions (hole fill, residual recovery) go in with :func:`insert_in_order`.
 """
 
 from __future__ import annotations
@@ -108,6 +113,133 @@ def _find_columns(
     return filtered, median_w
 
 
+def _overlapping_cols(
+    x1: float, x2: float, col_centers: list[tuple[float, float, float]]
+) -> list[int]:
+    """Columns a box spanning x1..x2 covers (>20% of the column's width), or
+    the nearest column by centre when it covers none."""
+    cols = []
+    for c, (center, cl, cr) in enumerate(col_centers):
+        overlap = min(x2, cr) - max(x1, cl)
+        col_w = cr - cl
+        if col_w > 0 and overlap > col_w * 0.2:
+            cols.append(c)
+    return cols if cols else [
+        min(range(len(col_centers)),
+            key=lambda c: abs(col_centers[c][0] - (x1 + x2) / 2))
+    ]
+
+
+def _x_overlaps(a: Region, b: Region, frac: float = 0.2) -> bool:
+    """Whether a and b share more than *frac* of the narrower one's width."""
+    overlap = min(a.bbox.x1, b.bbox.x1) - max(a.bbox.x0, b.bbox.x0)
+    return overlap > frac * min(a.bbox.width, b.bbox.width)
+
+
+def _is_above(b: Region, e: Region, frac: float = 0.3) -> bool:
+    """Whether b sits above e, allowing a small vertical overlap."""
+    tol = frac * min(b.bbox.height, e.bbox.height)
+    return b.bbox.y1 <= e.bbox.y0 + tol
+
+
+def _left_in_row(b: Region, e: Region, frac: float = 0.3) -> bool:
+    """Whether b sits to the left of e and shares its row (vertical overlap)."""
+    v_overlap = min(b.bbox.y1, e.bbox.y1) - max(b.bbox.y0, e.bbox.y0)
+    tol = frac * min(b.bbox.width, e.bbox.width)
+    return (b.bbox.x1 <= e.bbox.x0 + tol
+            and v_overlap > frac * min(b.bbox.height, e.bbox.height))
+
+
+def insert_in_order(base: list[Region], extras: list[Region]) -> list[Region]:
+    """Insert *extras* into an already-ordered *base* without re-sorting it.
+
+    Each extra is placed by its neighbours in the base order, not by a global
+    column sweep, so it works for sectioned pages (a mid-page banner starting
+    a new set of columns) and for row-major orders alike:
+
+    1. Of the base regions above it in its horizontal span, take the one
+       latest in reading order and insert right after it — unless the region
+       directly above is much wider (a masthead or banner opening a section),
+       which doesn't count as a predecessor.  When the base order runs row by
+       row rather than column by column, the candidates are instead every
+       region above it on the page plus those to its left in its row.
+    2. With nothing above it in its span and nothing to its left in its row
+       (the top-left of the page, or a masthead), it goes first.
+    3. Otherwise insert before the earliest-ordered base region below it in
+       its span.
+    4. With no base region in its span at all, fall back to a column sweep:
+       before the first base region in a later column, or lower in the same
+       column.
+
+    Extras that land at the same point keep column, then top-to-bottom, then
+    left-to-right order among themselves.
+    """
+    if not extras:
+        return list(base)
+    if not base:
+        return sorted(extras, key=lambda r: (r.bbox.y0, r.bbox.x0))
+
+    boxes = np.asarray([_bbox_tuple(r) for r in base + extras], dtype=int)
+    col_centers, _ = _find_columns(boxes)
+
+    def col(r: Region) -> int:
+        if not col_centers:
+            return 0
+        return min(_overlapping_cols(r.bbox.x0, r.bbox.x1, col_centers))
+
+    base_cols = [col(b) for b in base]
+    # Row-major if the order more often jumps back left to start a new row
+    # than back up to start a new column.
+    pairs = list(zip(base, base[1:]))
+    new_rows = sum(_is_above(a, b) and b.bbox.x1 <= a.bbox.x0 for a, b in pairs)
+    new_cols = sum(_is_above(b, a) and b.bbox.x0 >= a.bbox.x1 for a, b in pairs)
+    row_major = new_rows > new_cols
+
+    def position(e: Region, ec: int) -> int:
+        in_span = [i for i, b in enumerate(base) if _x_overlaps(b, e)]
+        above = [i for i in in_span if _is_above(base[i], e)]
+        left = [i for i, b in enumerate(base) if _left_in_row(b, e)]
+        # A much wider region directly above (masthead, banner, headline) opens
+        # a section rather than preceding e in its column; place e by what
+        # follows it instead.
+        under_wide = bool(above) and (
+            base[max(above, key=lambda i: base[i].bbox.y1)].bbox.width
+            > 1.5 * e.bbox.width
+        )
+        if row_major:
+            # Row by row: everything in earlier rows, plus this row's left side.
+            before = [i for i, b in enumerate(base) if _is_above(b, e)] + left
+        else:
+            before = [] if under_wide else above
+        if before:
+            return max(before) + 1
+        if not above and not left:
+            return 0
+        below = [i for i in in_span if base[i].bbox.y0 >= e.bbox.y0]
+        if below:
+            return min(below)
+        for i, b in enumerate(base):
+            if base_cols[i] > ec or (base_cols[i] == ec and b.bbox.y0 > e.bbox.y0):
+                return i
+        return len(base)
+
+    placed: list[tuple[int, int, int, int, int, Region]] = []
+    for k, e in enumerate(extras):
+        ec = col(e)
+        placed.append((position(e, ec), ec, e.bbox.y0, e.bbox.x0, k, e))
+    placed.sort(key=lambda t: t[:5])
+
+    out: list[Region] = []
+    j = 0
+    for i, b in enumerate(base):
+        while j < len(placed) and placed[j][0] == i:
+            out.append(placed[j][5])
+            j += 1
+        out.append(b)
+    out.extend(p[5] for p in placed[j:])
+    return out
+
+
 # ---------------------------------------------------------------------------
 # LayoutProcessor
 # ---------------------------------------------------------------------------
@@ -137,6 +269,9 @@ class LayoutProcessor:
         if not self.enabled:
             return layout
 
+        if layout.ordered:
+            return self._process_ordered(layout)
+
         regions = layout.regions
         regions = self._filter(regions)
         regions = self._rescue_low_confidence(regions, layout.regions)
@@ -146,6 +281,19 @@ class LayoutProcessor:
         regions = self._merge_adjacent(regions, layout.image)
         regions = self._drop_empty_overlaps(regions, layout.lines_detected)
         layout.regions = regions
+        return layout
+
+    def _process_ordered(self, layout: PageLayout) -> PageLayout:
+        """Post-process a layout whose detector supplied reading order.
+
+        Applies the confidence filter/rescue as a membership test so surviving
+        regions keep their original positions, then the empty-overlap drop.
+        """
+        kept = self._filter(layout.regions)
+        kept = self._rescue_low_confidence(kept, layout.regions)
+        keep_ids = {id(r) for r in kept}
+        regions = [r for r in layout.regions if id(r) in keep_ids]
+        layout.regions = self._drop_empty_overlaps(regions, layout.lines_detected)
         return layout
 
     # ------------------------------------------------------------------
@@ -408,21 +556,10 @@ class LayoutProcessor:
 
         num_cols = len(col_centers)
 
-        def overlapping_cols(x1: int, x2: int) -> list[int]:
-            cols = []
-            for c, (center, cl, cr) in enumerate(col_centers):
-                overlap = min(x2, cr) - max(x1, cl)
-                col_w = cr - cl
-                if col_w > 0 and overlap > col_w * 0.2:
-                    cols.append(c)
-            return cols if cols else [
-                min(range(num_cols), key=lambda c: abs(col_centers[c][0] - (x1 + x2) / 2))
-            ]
-
         assignments = []
         for i in range(n):
             x1, y1, x2, y2 = boxes[i]
-            cols = overlapping_cols(x1, x2)
+            cols = _overlapping_cols(x1, x2, col_centers)
             assignments.append((i, cols, int(y1)))
 
         col_buckets: list[list[tuple[int, int]]] = [[] for _ in range(num_cols)]
@@ -510,6 +647,7 @@ class LayoutProcessor:
                     lines=list(region.lines),
                     text=region.text,
                     confidence=region.confidence,
+                    source=region.source,
                 )
                 continue
 
@@ -544,6 +682,9 @@ class LayoutProcessor:
                     lines=current.lines + region.lines,
                     text=combined_text,
                     confidence=max(current.confidence, region.confidence),
+                    # A block that absorbed any primary region counts as primary.
+                    source=(current.source if current.source == region.source
+                            else "primary"),
                 )
             else:
                 merged.append(current)
@@ -554,6 +695,7 @@ class LayoutProcessor:
                     lines=list(region.lines),
                     text=region.text,
                     confidence=region.confidence,
+                    source=region.source,
                 )
 
         if current is not None:
