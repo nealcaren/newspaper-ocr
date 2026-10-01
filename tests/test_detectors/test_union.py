@@ -297,3 +297,31 @@ def test_hole_under_multi_column_head_stays_in_its_column():
             _r(210, 110, 390, 390, name="B"), _r(410, 110, 590, 390, name="C")]
     out = insert_in_order(base, [_r(410, 101, 590, 109, name="HC")])
     assert _names(out) == ["A", "BC_head", "B", "HC", "C"]
+
+
+# ---------------------------------------------------------------------------
+# Picture regions don't hide text
+# ---------------------------------------------------------------------------
+
+def test_text_inside_a_primary_picture_becomes_a_hole():
+    # MinerU filed the whole page under one "image"; DocLayout found the text.
+    img = _page([(20, 20, 280, 380)])
+    primary = [_r(0, 0, 600, 400, "PAGE", label="image")]
+    cands = [_r(20, 20, 280, 380, "STORY", label="plain_text")]
+    holes = UnionDetector(None, None).find_holes(img, primary, cands)
+    assert _names(holes) == ["STORY"]
+
+
+def test_picture_candidate_inside_a_primary_picture_is_not_a_hole():
+    img = _page([(20, 20, 280, 380)])
+    primary = [_r(0, 0, 600, 400, "PHOTO", label="image")]
+    cands = [_r(20, 20, 280, 380, "FIG", label="figure")]
+    assert UnionDetector(None, None).find_holes(img, primary, cands) == []
+
+
+def test_transparency_can_be_turned_off():
+    img = _page([(20, 20, 280, 380)])
+    primary = [_r(0, 0, 600, 400, "PAGE", label="image")]
+    cands = [_r(20, 20, 280, 380, "STORY", label="plain_text")]
+    union = UnionDetector(None, None, transparent_labels=())
+    assert union.find_holes(img, primary, cands) == []

@@ -12,10 +12,11 @@ Modular OCR pipeline for historical newspaper scans. Three-phase architecture wi
           │ Detection            │   │ Recognition          │   │ Text Cleaning        │
           │ (AS YOLO,            │   │ (Tesseract,          │   │ (dehyphenation,      │
 Image ──→ │  DocLayout-YOLO,     │──→│  tesserocr, Kraken,  │──→│  line joining)       │──→ Output
-JP2/JPG/  │  PP-DocLayout)       │   │  TrOCR, GLM-OCR,     │   │                      │    text
-PNG/PDF   │                      │   │  LightOnOCR,         │   │ Spell Check          │    json
-          │ Layout Proc.         │   │  PaddleOCR-VL,       │   │ (SymSpell)           │    hOCR
-          │ (reading order,      │   │  EffOCR)             │   │                      │    viewer
+JP2/JPG/  │  PP-DocLayout,       │   │  TrOCR, GLM-OCR,     │   │                      │    text
+PNG/PDF   │  MinerU2.5;          │   │  LightOnOCR,         │   │ Spell Check          │    json
+          │  + hole fill)        │   │  PaddleOCR-VL,       │   │ (SymSpell)           │    hOCR
+          │ Layout Proc.         │   │  MinerU2.5, EffOCR,  │   │                      │    viewer
+          │ (reading order,      │   │  hosted VLMs)        │   │                      │
           │  dedup, merge)       │   │                      │   │                      │
           └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
@@ -35,14 +36,16 @@ pip install newspaper-ocr
 #   macOS: brew install tesseract
 #   Ubuntu: apt install tesseract-ocr
 
-# Recommended detector + a strong recognizer:
-pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector (best layout)
+# Linux + CUDA GPU (best accuracy): MinerU2.5 + DocLayout-YOLO hole fill
+pip install "newspaper-ocr[mineru,doclayout]"
+
+# Mac / local (lowest memory): DocLayout-YOLO + GLM-OCR
+pip install "newspaper-ocr[doclayout]"    # DocLayout-YOLO detector
 pip install "newspaper-ocr[glm-ocr]"      # GLM-OCR vision-language model
 
 # Other optional backends:
 pip install "newspaper-ocr[paddlex]"      # PP-DocLayout detector
 pip install "newspaper-ocr[paddleocr-vl]" # PaddleOCR-VL VLM
-pip install "newspaper-ocr[mineru]"       # MinerU2.5 detector + recognizer (CUDA GPU)
 pip install "newspaper-ocr[kraken]"       # Kraken OCR (fast, GPU optional)
 pip install "newspaper-ocr[trocr]"        # TrOCR (fine-tuned, GPU recommended)
 pip install "newspaper-ocr[lightonocr]"   # LightOnOCR (GPU required)
@@ -64,8 +67,14 @@ from newspaper_ocr import Pipeline
 pipe = Pipeline()
 text = pipe.ocr("page.jp2")
 
-# Recommended for accuracy: DocLayout-YOLO + a region VLM
+# Linux + CUDA GPU (best accuracy): MinerU2.5 reads the page, DocLayout-YOLO fills its holes
+pipe = Pipeline(detector="mineru", hole_fill_detector="doclayout_yolo", recognizer="mineru")
+
+# Mac / local (lowest memory): DocLayout-YOLO + GLM-OCR
 pipe = Pipeline(recognizer="glm-ocr")     # detector="auto" -> doclayout_yolo
+
+# Multi-page PDF: one result per page
+pages = pipe.ocr_pdf("issue.pdf")
 
 # Bundled fine-tuned Tesseract model (free, fully local)
 pipe = Pipeline(recognizer="tesseract", recognizer_model="news_combo_fast")
@@ -81,9 +90,13 @@ results = pipe.ocr_batch(["page1.jp2", "page2.jp2", "page3.jp2"])
 
 ```bash
 newspaper-ocr page.jp2                                     # basic OCR
-newspaper-ocr page.jp2 --backend glm-ocr --output json    # DocLayout + GLM-OCR, JSON
+newspaper-ocr page.jp2 --backend glm-ocr --output json    # Mac/local: DocLayout + GLM-OCR, JSON
+newspaper-ocr page.jp2 --detector mineru --hole-fill-detector doclayout_yolo \
+    --backend mineru                                       # Linux + CUDA: best accuracy
 newspaper-ocr page.jp2 --model news_combo_fast            # bundled fine-tuned model
 newspaper-ocr *.jp2 --outdir results/ --output text       # batch to files
+newspaper-ocr issue.pdf --outdir results/                 # multi-page PDF, one file per page
+newspaper-ocr page.jp2 --backend mineru --markup raw      # keep VLM HTML tables/LaTeX (default: plain text)
 ```
 
 See the **[detailed guide](docs/guide.md)** for PDF input, every detector and
@@ -100,6 +113,7 @@ is real API spend ($0 = local). Higher is better.
 | Detector | Recognizer | newspaper-ocr | overall | cased | bowF1 | $/100pg |
 |:---|:---|:---:|:---:|:---:|:---:|:---:|
 | **MinerU2.5 + DocLayout holes** | MinerU2.5 | 0.9.0 | **0.974** | **0.957** | 0.985 | $0.00 |
+| **MinerU2.5 (vLLM) + DocLayout holes** | MinerU2.5 | 0.10.0 | 0.973 | 0.956 | 0.986 | $0.00 |
 | **DocLayout-YOLO** | PaddleOCR-VL | 0.8.1 | 0.970 | 0.953 | 0.985 | $0.00 |
 | MinerU2.5 | MinerU2.5 | 0.9.0 | 0.966 | 0.950 | 0.981 | $0.00 |
 | **DocLayout-YOLO** | GLM-OCR | 0.8.1 | 0.959 | 0.943 | 0.985 | $0.00 |
@@ -129,13 +143,14 @@ DocLayout needs no residual to reach the top.
 
 Practical guidance:
 
-- **Best accuracy:** MinerU2.5 with DocLayout-YOLO filling its holes (0.974; needs a CUDA GPU) — see [below](#best-result-mineru--doclayout-hole-fill-0974-local-free).
-- **Best accuracy without MinerU:** `detector="auto"` (→ DocLayout-YOLO) + a region VLM (`glm-ocr` or `paddleocr-vl`).
+- **Linux + CUDA GPU (best accuracy):** MinerU2.5 with DocLayout-YOLO filling its holes (0.974) — see [below](#best-result-mineru--doclayout-hole-fill-0974-local-free).
+- **Mac / local (lowest memory):** `detector="auto"` (→ DocLayout-YOLO) + `glm-ocr` (0.959). On a CUDA box without MinerU, `paddleocr-vl` scores a bit higher (0.970).
 - **Cheapest hosted:** PaddleX + Gemini-flash-lite reaches 0.936 at ~$4.51/100 pages.
 - **Free / fully local / no GPU:** DocLayout-YOLO + Tesseract still reaches 0.919.
 - **Avoid** the whole-page (no-detector) path on dense pages — layout is the bottleneck.
 
-_(0.8.1 and 0.9.0 rows are the GPU matrix (L40S); 0.6.0/0.7.0 rows are the
+_(0.8.1, 0.9.0 and 0.10.0 rows are the GPU matrix (L40S); the vLLM row runs
+~20× faster at the same accuracy; 0.6.0/0.7.0 rows are the
 earlier Mac/MLX + hosted-API runs. Full sheet with tokens/speed:_
 `python scoresheet.py` _in the [NewsBench](https://github.com/nealcaren/newsbench) repo.)_
 
@@ -217,8 +232,19 @@ Holes are recognized with MinerU because they are isolated blocks in its comfort
 zone; feeding it DocLayout's coarse *columns* makes it duplicate text, so without
 MinerU's own boxes, use a region-native recognizer (GLM-OCR / PaddleOCR-VL). Any
 two detectors can be combined this way (`hole_fill_detector=`); see the
-[guide](docs/guide.md#combining-detectors-hole-fill). MinerU needs a CUDA GPU
-(~30–80 s/page on an L40S); on a Mac it is impractically slow.
+[guide](docs/guide.md#combining-detectors-hole-fill). MinerU needs a CUDA GPU;
+on a Mac it is impractically slow.
+
+**On vLLM it is ~20× faster at the same accuracy.** `pip install
+"newspaper-ocr[mineru,mineru-vllm,doclayout]"` and use the `mineru-vllm` detector and
+recognizer: ~8 s/page on an L40S instead of ~80 s (and no 30-minute repetition
+loops), scoring 0.973 on NewsBench vs 0.974. See
+[Running at scale](docs/guide.md#running-at-scale) for batch runs and Slurm.
+
+```bash
+newspaper-ocr issue.pdf --detector mineru-vllm --hole-fill-detector doclayout_yolo \
+    --backend mineru-vllm --outdir results/
+```
 
 See [docs/error-analysis.md](docs/error-analysis.md) for where the top configs
 still miss or over-transcribe, cropped from the scans.

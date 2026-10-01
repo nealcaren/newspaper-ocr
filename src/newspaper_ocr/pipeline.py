@@ -35,6 +35,8 @@ class Pipeline:
         chunk_overlap: int = chunking.CHUNK_OVERLAP,
         residual_ocr: bool | str = "auto",
         hole_fill_detector: Detector | str | None = None,
+        markup: str = "plain",
+        region_dedup: bool | str = "auto",
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -124,6 +126,18 @@ class Pipeline:
         # Optional spell correction (off by default — it's aggressive)
         from newspaper_ocr.spell_checker import SpellChecker
         self.spell_checker = SpellChecker(enabled=spell_check)
+
+        # VLMs answer in HTML tables, LaTeX and Markdown; "plain" (default)
+        # strips that to newspaper text, "raw" keeps the model's markup.
+        from newspaper_ocr.markup import MODES
+        if markup not in MODES:
+            raise ValueError(f"markup must be one of {MODES}; got {markup!r}")
+        self.markup = markup
+
+        # Drop regions that re-read another region's text (see
+        # region_repair.drop_duplicate_regions). "auto" runs it for
+        # region-level recognizers, whose overlapping boxes are each read whole.
+        self.region_dedup = region_dedup
 
         # Residual second-pass recovery (mask detected boxes -> re-OCR leftover
         # ink). "auto" (default) enables it for region-level recognizers, where
@@ -392,6 +406,18 @@ class Pipeline:
         # Region-level recognizers (GLM-OCR, VLMs) already return clean text.
         if isinstance(self.recognizer, LineRecognizer):
             layout = self.text_cleaner.clean(layout)
+
+        if self.markup == "plain":
+            from newspaper_ocr.markup import to_plain
+            for region in layout.regions:
+                region.text = to_plain(region.text)
+
+        # After markup cleanup, so text containment compares clean text.
+        if self.region_dedup is True or (
+            self.region_dedup == "auto" and isinstance(self.recognizer, RegionRecognizer)
+        ):
+            from newspaper_ocr.region_repair import drop_duplicate_regions
+            layout = drop_duplicate_regions(layout)
 
         layout = self.spell_checker.check(layout)
         return layout

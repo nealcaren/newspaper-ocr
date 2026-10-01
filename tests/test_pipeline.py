@@ -242,3 +242,64 @@ def test_fallback_threshold_boundary():
     result = pipe.run(_make_img())
     assert "exact" in result
     assert fallback.call_count == 0
+
+
+class MarkupRecognizer(RegionRecognizer):
+    def recognize(self, region):
+        region.text = "<table><tr><td>A</td><td>1</td></tr></table>"
+        return region
+
+
+def _markup_pipeline(**kwargs):
+    return Pipeline(
+        detector=MockDetector(), recognizer=MarkupRecognizer(),
+        output=MockFormatter(), layout_processing=False, residual_ocr=False, **kwargs,
+    )
+
+
+def test_markup_stripped_by_default():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    assert _markup_pipeline().run(img) == "A\t1"
+
+
+def test_markup_raw_keeps_model_output():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    assert "<td>" in _markup_pipeline(markup="raw").run(img)
+
+
+def test_markup_rejects_unknown_mode():
+    import pytest
+    with pytest.raises(ValueError):
+        _markup_pipeline(markup="html")
+
+
+class OverlapDetector(Detector):
+    """A page whose layout reads the same paragraph twice (outer + inner box)."""
+
+    def detect(self, image):
+        w, h = image.size
+        boxes = [BBox(0, 0, w, h), BBox(5, 5, w - 5, h // 2)]
+        regions = [Region(bbox=b, image=image.crop(b.to_tuple()), label="text") for b in boxes]
+        return PageLayout(image=image, regions=regions, width=w, height=h, ordered=True)
+
+
+class SameTextRecognizer(RegionRecognizer):
+    def recognize(self, region):
+        region.text = "Duff withdraws from the race for student body president."
+        return region
+
+
+def _dedup_pipeline(**kwargs):
+    return Pipeline(detector=OverlapDetector(), recognizer=SameTextRecognizer(),
+                    output=MockFormatter(), residual_ocr=False,
+                    layout_processing=False, **kwargs)
+
+
+def test_region_dedup_on_by_default_for_region_recognizers():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    assert len(_dedup_pipeline().analyze(img).regions) == 1
+
+
+def test_region_dedup_can_be_turned_off():
+    img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+    assert len(_dedup_pipeline(region_dedup=False).analyze(img).regions) == 2

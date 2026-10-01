@@ -121,3 +121,56 @@ def test_detector_turns_oom_into_actionable_memory_error(fake):
     fake(FakeClient(layout_exc=ValueError("bad output")))
     with pytest.raises(ValueError):
         MineruDetector().detect(Image.new("RGB", (50, 50)))
+
+
+# --- backend selection ------------------------------------------------------
+
+
+@pytest.fixture
+def recorded_clients(monkeypatch):
+    """Record MinerUClient construction instead of loading a model."""
+    made = []
+
+    class RecordingClient:
+        def __init__(self, **kwargs):
+            made.append(kwargs)
+
+    import mineru_vl_utils
+    monkeypatch.setattr(mineru_vl_utils, "MinerUClient", RecordingClient)
+    monkeypatch.setattr(_mineru, "_vllm_engine", lambda model: f"engine:{model}")
+    monkeypatch.setattr(_mineru, "_CLIENTS", {})
+    monkeypatch.delenv("MINERU_SERVER_URL", raising=False)
+    return made
+
+
+def test_vllm_backend_shares_one_engine_between_detector_and_recognizer(recorded_clients):
+    from newspaper_ocr.detectors import DETECTORS
+    from newspaper_ocr.recognizers import RECOGNIZERS
+
+    det = DETECTORS.get("mineru-vllm")(model_dir=None, skip_lines=False)
+    rec = RECOGNIZERS.get("mineru-vllm")()
+    assert det.client is rec.client
+    assert len(recorded_clients) == 1
+    assert recorded_clients[0]["backend"] == "vllm-engine"
+    assert recorded_clients[0]["vllm_llm"] == f"engine:{_mineru.DEFAULT_MODEL}"
+    assert det.device == "cuda"
+
+
+def test_http_backend_reads_server_url_from_env(recorded_clients, monkeypatch):
+    monkeypatch.setenv("MINERU_SERVER_URL", "http://gpu01:30000")
+    from newspaper_ocr.recognizers import RECOGNIZERS
+
+    rec = RECOGNIZERS.get("mineru-http")()
+    assert recorded_clients[0]["backend"] == "http-client"
+    assert recorded_clients[0]["server_url"] == "http://gpu01:30000"
+    assert rec.device == "remote"
+
+
+def test_http_backend_without_server_is_actionable(recorded_clients):
+    with pytest.raises(ValueError, match="MINERU_SERVER_URL"):
+        _mineru.get_client(backend="http")
+
+
+def test_unknown_backend_rejected(recorded_clients):
+    with pytest.raises(ValueError, match="backend"):
+        _mineru.get_client(backend="sglang")

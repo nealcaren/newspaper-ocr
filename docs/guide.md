@@ -18,6 +18,18 @@ pages = pipe.ocr_pdf("issue.pdf")
 pages = pipe.ocr_pdf("industrial-worker-1912.pdf", rotate=90)
 ```
 
+From the command line, pass the PDF like any image. Each page is written to
+`<stem>_p001.txt`, `<stem>_p002.txt`, … under `--outdir` (or printed in order,
+with a page header on stderr):
+
+```bash
+newspaper-ocr issue.pdf --outdir results/ --output json
+newspaper-ocr industrial-worker-1912.pdf --rotate 90 --pages 1-3,7 --outdir results/
+```
+
+`--pages` is 1-based; `--dpi` sets the render resolution for pages with no
+embedded scan.
+
 Requires: `pip install "newspaper-ocr[pdf]"`
 
 Each page is taken from its **largest embedded image**, not the first one. Pages
@@ -436,6 +448,28 @@ Reconstructs continuous text from OCR'd lines:
 
 Disable with `text_cleaning=False` or `--no-text-cleaning`.
 
+### Markup Cleanup
+
+Document VLMs answer in the markup they were trained on — MinerU2.5 especially.
+By default (`markup="plain"`) it is stripped to newspaper text:
+
+| Model output | Plain text |
+|:---|:---|
+| `<table><tr><td>Haner</td><td>5</td><td>1-2</td>…` | one line per row, cells tab-separated: `Haner⇥5⇥1-2…` |
+| `Made \(\$ 25,000\)in Three Months` | `Made $25,000 in Three Months` |
+| `a subscription of \(500 presented` (a `$` misread as math) | `a subscription of $500 presented` |
+| `the floor \(4^{12}\) hours`, `\(\frac{1}{2}\)` | `4½ hours`, `½` |
+| `Dennis Rash  ⏎Receive…`, `## Head`, `**Bold**` | hard break, heading and bold markers removed |
+
+Text without markup passes through unchanged (`<` in prose, `$2 fee`, single-`*`
+asterisks). Pass `markup="raw"` or `--markup raw` to keep the model's HTML,
+LaTeX and Markdown — e.g. to render tables. The repetition detector always
+looks at tag-free text, so a table's repeated `</td><td>` is never mistaken for
+a generation loop.
+
+LaTeX in a newspaper scan is nearly always the model hallucinating on a stamp or
+ornament; cleanup flattens it but cannot tell it was invented.
+
 ### Spell Correction
 
 Optional SymSpell-based correction (`spell_check=True`):
@@ -452,6 +486,90 @@ pipe = Pipeline(spell_check=True)
 from newspaper_ocr.spell_checker import SpellChecker
 checker = SpellChecker(dictionary_path="my_newspaper_words.txt")
 ```
+
+## Running at scale
+
+Two things make a large collection practical: a fast MinerU backend and a CLI
+that survives being killed.
+
+### MinerU backends
+
+MinerU2.5 is registered under three names; pick one for both `--detector` and
+`--backend` (they share one loaded model):
+
+| Name | Backend | Use |
+|:---|:---|:---|
+| `mineru` | Hugging Face transformers | CUDA, MPS or CPU; simplest install |
+| `mineru-vllm` | in-process vLLM engine | CUDA only; ~20× faster on full pages |
+| `mineru-http` | a running vLLM server (`MINERU_SERVER_URL`) | many CPU workers sharing one GPU server |
+
+```bash
+pip install "newspaper-ocr[mineru,mineru-vllm,doclayout,pdf]"
+newspaper-ocr issue.pdf --detector mineru-vllm --hole-fill-detector doclayout_yolo \
+    --backend mineru-vllm --outdir results/ --output json
+```
+
+Measured on 30 *Daily Tar Heel* pages (L40S): 259 s on `mineru-vllm` vs
+5,492 s on `mineru`. Most of the gap is batching, the rest is MinerU's
+no-repeat logits processor, which vLLM runs and transformers doesn't: two pages
+that looped for ~29 minutes each on transformers took ~15 s. NewsBench (n = 15):
+0.973 vs 0.974.
+
+What the `mineru-vllm` engine sets, and why:
+
+- **`gpu_memory_utilization=0.75`** — vLLM claims its share up front; the rest
+  is left for a hole-fill detector. Override with `NEWSPAPER_OCR_VLLM_GPU_MEMORY`.
+- **Prefix caching off.** With it on, re-running layout on a page whose prompt
+  was cached gave different blocks than the cold run — on one NewsBench page 681
+  instead of 203, halving its score. Off, repeats are identical to the cold run.
+- **PyTorch sampling** (`VLLM_USE_FLASHINFER_SAMPLER=0`). vLLM's default
+  FlashInfer sampler compiles a CUDA kernel on first use and fails on cluster
+  nodes without `nvcc`. Set the variable to `1` to opt back in.
+
+Layout is reproducible run to run; recognition can still differ by a character
+here and there, because vLLM batches requests differently each time. Scores are
+unaffected. vLLM's batch-invariant mode (`VLLM_BATCH_INVARIANT=1`) removes it at
+~3× the cost.
+
+### Batch runs
+
+Whenever `--outdir` is given, the CLI runs in batch mode:
+
+- each page is written atomically (temp file + rename), so an output file only
+  exists if it is complete;
+- `--skip-existing` skips pages whose output exists — rerun the same command
+  after a crash or time limit and it resumes;
+- a failing page is logged and skipped, and the exit status is 1 at the end;
+- `--log run.jsonl` appends one line per page: `status`, `seconds`, `regions`,
+  `chars`, `flagged` (regions with a non-`ok` status) and any `error`;
+- `--files-from list.txt` reads inputs from a file, `--shard I/N` takes every
+  N-th input starting at I, and `--input-root DIR` mirrors input folders under
+  `--outdir`.
+
+The same runner is available from Python as `newspaper_ocr.batch.run_batch`.
+
+### Slurm job arrays
+
+Give every array task the same input list and its own shard and log:
+
+```bash
+#!/bin/bash
+#SBATCH --array=0-15
+#SBATCH --partition=l40-gpu,a100-gpu   # start on whichever frees first
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=11:00:00
+export HF_HUB_OFFLINE=1   # pre-download models on the login node
+newspaper-ocr --files-from all.txt --shard "$SLURM_ARRAY_TASK_ID/16" \
+  --input-root collection/ --outdir out/ --output json \
+  --detector mineru-vllm --hole-fill-detector doclayout_yolo --backend mineru-vllm \
+  --skip-existing --log "out/logs/task-$SLURM_ARRAY_TASK_ID.jsonl"
+```
+
+`--shard` interleaves inputs, so each task gets a similar mix of short and long
+issues. Resubmitting the same array after a timeout picks up where each task
+stopped.
 
 ## Output Formats
 

@@ -10,6 +10,14 @@ primary missed that contain real ink.  A secondary box is kept as a hole when
 * at least ``ink_min`` of its pixels are ink, which screens out margins and
   whitespace-only granularity mismatches between the two detectors.
 
+Primary *picture* regions (``transparent_labels``, MinerU's ``image`` by
+default) don't count as coverage for text-like candidates.  The recognizer
+skips pictures, so text the primary filed under a picture would otherwise be
+lost outright: on the *Daily Tar Heel* pilot MinerU labelled an entire 1963
+news page as one ``image`` and the page came back empty.  Candidates that are
+themselves pictures (``picture_labels``, DocLayout's ``figure``) still treat
+those regions as covered, so photos aren't re-added and read as text.
+
 On NewsBench, MinerU2.5 boxes plus DocLayout-YOLO holes beat either detector
 alone: MinerU's order is excellent but it misses isolated blocks (a poem stanza,
 an ad, a side column) that DocLayout covers.  Most pages get few or no holes and
@@ -44,6 +52,12 @@ class UnionDetector(Detector):
         Secondary labels never used as holes, e.g. ``{"abandon"}`` to skip
         DocLayout-YOLO's header/footer/page-number/noise class.  Empty by
         default, matching the NewsBench prototype.
+    transparent_labels : iterable of str
+        Primary labels that don't cover text-like candidates (pictures the
+        recognizer will skip).
+    picture_labels : iterable of str
+        Secondary labels that are pictures themselves; they are checked
+        against all primary regions, transparent ones included.
 
     The returned layout tags each region's ``source`` as ``"primary"`` or
     ``"hole"``.  If the primary layout is ``ordered``, holes are inserted into
@@ -60,6 +74,8 @@ class UnionDetector(Detector):
         ink_min: float = 0.012,
         ink_thresh: int | None = 128,
         exclude_labels: Iterable[str] = (),
+        transparent_labels: Iterable[str] = ("image", "image_block"),
+        picture_labels: Iterable[str] = ("figure",),
     ):
         self.primary = primary
         self.secondary = secondary
@@ -67,6 +83,8 @@ class UnionDetector(Detector):
         self.ink_min = ink_min
         self.ink_thresh = ink_thresh
         self.exclude_labels = frozenset(exclude_labels)
+        self.transparent_labels = frozenset(transparent_labels)
+        self.picture_labels = frozenset(picture_labels)
         #: Number of holes added on the most recent page, for diagnostics.
         self.last_n_holes = 0
 
@@ -106,23 +124,31 @@ class UnionDetector(Detector):
         """Return the candidates that fill holes in *primary* coverage."""
         ink = self._ink_mask(image)
         h, w = ink.shape
+        # Text candidates see only opaque primary regions; picture candidates
+        # see all of them (see the module docstring).
         covered = np.zeros((h, w), dtype=bool)
+        covered_all = np.zeros((h, w), dtype=bool)
         for r in primary:
-            covered[self._slice(r, w, h)] = True
+            sl = self._slice(r, w, h)
+            covered_all[sl] = True
+            if r.label not in self.transparent_labels:
+                covered[sl] = True
 
         holes: list[Region] = []
         for r in sorted(candidates, key=lambda r: -r.confidence):
             if r.label in self.exclude_labels:
                 continue
             sl = self._slice(r, w, h)
-            if covered[sl].size == 0:
+            mask = covered_all if r.label in self.picture_labels else covered
+            if mask[sl].size == 0:
                 continue
-            if covered[sl].mean() >= self.overlap_max:
+            if mask[sl].mean() >= self.overlap_max:
                 continue
             if ink[sl].mean() < self.ink_min:
                 continue
             holes.append(r)
             covered[sl] = True
+            covered_all[sl] = True
         return holes
 
     def _ink_mask(self, image: Image.Image) -> np.ndarray:

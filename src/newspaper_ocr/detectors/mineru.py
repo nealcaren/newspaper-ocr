@@ -25,12 +25,19 @@ class MineruDetector(Detector):
     Requires: ``pip install "newspaper-ocr[mineru]"``.
     """
 
+    #: MinerU backend (see :data:`newspaper_ocr._mineru.BACKENDS`).
+    backend = "transformers"
+
     def __init__(self, model: str = _mineru.DEFAULT_MODEL,
-                 device: str | None = None, **kwargs):
+                 device: str | None = None, backend: str | None = None,
+                 server_url: str | None = None, **kwargs):
         # model_dir / skip_lines are passed by Pipeline for every detector;
         # MinerU is region-only and uses the Hugging Face cache.
-        self.device = device or _mineru.default_device()
-        self.client = _mineru.get_client(model, self.device)
+        self.backend = backend or self.backend
+        self.device = _mineru.resolve_device(self.backend, device)
+        self.client = _mineru.get_client(
+            model, self.device, backend=self.backend, server_url=server_url
+        )
 
     def detect(self, image: Image.Image) -> PageLayout:
         w, h = image.size
@@ -56,3 +63,15 @@ class MineruDetector(Detector):
             ))
         return PageLayout(image=image, regions=regions, width=w, height=h,
                           lines_detected=False, ordered=True)
+
+
+class MineruVllmDetector(MineruDetector):
+    """:class:`MineruDetector` on an in-process vLLM engine (CUDA)."""
+
+    backend = "vllm"
+
+
+class MineruHttpDetector(MineruDetector):
+    """:class:`MineruDetector` against a vLLM server (``MINERU_SERVER_URL``)."""
+
+    backend = "http"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "newspaper-ocr"
-version = "0.9.0"
+version = "0.10.0"
 description = "Modular OCR pipeline for historical newspaper scans"
 readme = "README.md"
 license = "MIT"
@@ -48,6 +48,7 @@ trocr = ["transformers>=4.30", "torch"]
 lightonocr = ["transformers>=4.50", "torch"]
 paddleocr-vl = ["transformers>=5.3", "torch"]
 mineru = ["mineru-vl-utils[transformers]>=2.0", "torch"]
+mineru-vllm = ["mineru-vl-utils>=2.0", "vllm"]
 api = ["httpx>=0.24"]
 pdf = ["pymupdf>=1.24"]
 all = ["newspaper-ocr[tesseract,paddlex,doclayout,glm-ocr,kraken,trocr,lightonocr,paddleocr-vl,mineru,api,pdf]"]

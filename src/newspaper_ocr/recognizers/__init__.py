@@ -54,8 +54,12 @@ except ImportError:
 
 try:
     import mineru_vl_utils  # noqa: F401  (optional [mineru] extra)
-    from newspaper_ocr.recognizers.mineru import MineruRecognizer
+    from newspaper_ocr.recognizers.mineru import (
+        MineruRecognizer, MineruHttpRecognizer, MineruVllmRecognizer,
+    )
     RECOGNIZERS.register("mineru", MineruRecognizer)
+    RECOGNIZERS.register("mineru-vllm", MineruVllmRecognizer)
+    RECOGNIZERS.register("mineru-http", MineruHttpRecognizer)
 except ImportError:
     pass
 
