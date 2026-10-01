@@ -30,6 +30,8 @@ class MineruRecognizer(RegionRecognizer):
     """
 
     mode = "region"
+    #: MinerU backend (see :data:`newspaper_ocr._mineru.BACKENDS`).
+    backend = "transformers"
 
     def __init__(
         self,
@@ -37,10 +39,15 @@ class MineruRecognizer(RegionRecognizer):
         device: str | None = None,
         repetition_min_len: int = repetition.MIN_LEN,
         repetition_min_reps: int = repetition.MIN_REPS,
+        backend: str | None = None,
+        server_url: str | None = None,
         **kwargs,
     ):
-        self.device = device or _mineru.default_device()
-        self.client = _mineru.get_client(model, self.device)
+        self.backend = backend or self.backend
+        self.device = _mineru.resolve_device(self.backend, device)
+        self.client = _mineru.get_client(
+            model, self.device, backend=self.backend, server_url=server_url
+        )
         self.repetition_min_len = repetition_min_len
         self.repetition_min_reps = repetition_min_reps
         from mineru_vl_utils.structs import BLOCK_TYPES
@@ -100,3 +107,15 @@ class MineruRecognizer(RegionRecognizer):
             [r.image.convert("RGB") for r in regions],
             [self._block_type(r.label) for r in regions],
         )
+
+
+class MineruVllmRecognizer(MineruRecognizer):
+    """:class:`MineruRecognizer` on an in-process vLLM engine (CUDA)."""
+
+    backend = "vllm"
+
+
+class MineruHttpRecognizer(MineruRecognizer):
+    """:class:`MineruRecognizer` against a vLLM server (``MINERU_SERVER_URL``)."""
+
+    backend = "http"

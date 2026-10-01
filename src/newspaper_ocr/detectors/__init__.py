@@ -20,7 +20,11 @@ except ImportError:
 
 try:
     import mineru_vl_utils  # noqa: F401  (optional [mineru] extra)
-    from newspaper_ocr.detectors.mineru import MineruDetector
+    from newspaper_ocr.detectors.mineru import (
+        MineruDetector, MineruHttpDetector, MineruVllmDetector,
+    )
     DETECTORS.register("mineru", MineruDetector)
+    DETECTORS.register("mineru-vllm", MineruVllmDetector)
+    DETECTORS.register("mineru-http", MineruHttpDetector)
 except ImportError:
     pass
