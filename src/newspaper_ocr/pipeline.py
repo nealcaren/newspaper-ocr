@@ -274,13 +274,17 @@ class Pipeline:
         ``RESCUE_MAX_CHARS``, read the alternates lying inside it instead.  The
         swap happens only if they produce more text, so it can't lose anything.
         """
+        from newspaper_ocr.markup import to_plain
+
         page_area = max(1, layout.width * layout.height)
         alternates = [a for a in layout.alternates if a.label not in self.RESCUE_EXCLUDE]
         keep, rescued = [], []
         for region in layout.regions:
             b = region.bbox
             area = max(0, b.x1 - b.x0) * max(0, b.y1 - b.y0)
-            text = (region.text or "").strip()
+            # Judge emptiness on markup-free text: an empty table comes back as
+            # "<table><tr><td></td>..." — long, but nothing in it.
+            text = to_plain(region.text or "").strip()
             if (region.label in self.RESCUE_SKIP or area < self.RESCUE_MIN_AREA * page_area
                     or len(text) >= self.RESCUE_MAX_CHARS):
                 keep.append(region)
@@ -293,8 +297,8 @@ class Pipeline:
                 if a.image is None:
                     a.image = layout.image.crop(a.bbox.to_tuple())
             reads = self._read_regions(layout.image, inside)
-            reads = [r for r in reads if (r.text or "").strip()]
-            if sum(len(r.text.strip()) for r in reads) <= len(text):
+            reads = [r for r in reads if to_plain(r.text or "").strip()]
+            if sum(len(to_plain(r.text).strip()) for r in reads) <= len(text):
                 keep.append(region)
                 continue
             for r in reads:

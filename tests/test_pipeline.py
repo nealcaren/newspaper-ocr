@@ -370,3 +370,16 @@ def test_rescue_keeps_region_when_alternates_read_less():
                     residual_ocr=False, layout_processing=False)
     regions = pipe.analyze(_page_img()).regions
     assert len(regions) == 1 and regions[0].label == "table"
+
+
+def test_empty_html_table_counts_as_empty():
+    class EmptyTable(EmptyBigReadRecognizer):
+        def recognize(self, region):
+            region = super().recognize(region)
+            if region.text == "":
+                region.text = "<table>" + "<tr><td></td><td></td></tr>" * 10 + "</table>"
+            return region
+    pipe = Pipeline(detector=ClassifiedsDetector(), recognizer=EmptyTable(), output=MockFormatter(),
+                    residual_ocr=False, layout_processing=False)
+    regions = pipe.analyze(_page_img()).regions
+    assert [r.source for r in regions] == ["rescue"] * 3
