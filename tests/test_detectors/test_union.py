@@ -325,3 +325,12 @@ def test_transparency_can_be_turned_off():
     cands = [_r(20, 20, 280, 380, "STORY", label="plain_text")]
     union = UnionDetector(None, None, transparent_labels=())
     assert union.find_holes(img, primary, cands) == []
+
+
+def test_union_passes_unused_candidates_as_alternates():
+    img = _page([(310, 10, 590, 190)])
+    prim = FixedDetector([(0, 0, 300, 400, "P")])
+    cand = FixedDetector([(310, 10, 590, 190, "H"), (20, 20, 280, 380, "INSIDE")])
+    layout = UnionDetector(prim, cand).detect(img)
+    assert _names(layout.regions) == ["P", "H"]
+    assert _names(layout.alternates) == ["INSIDE"]

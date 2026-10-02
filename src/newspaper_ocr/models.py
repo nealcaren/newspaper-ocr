@@ -99,6 +99,10 @@ class PageLayout:
         (e.g. a VLM layout model with native ordering).  Layout post-processing
         and the residual pass then keep that order — inserting any new regions
         into it — instead of re-sorting, merging or gap-filling the page.
+    alternates : list[Region]
+        A second detector's boxes that were not used as regions (the hole-fill
+        detector's leftovers).  The pipeline reads them in place of a large
+        region whose read came back empty; see ``Pipeline(rescue_empty_reads=)``.
     """
 
     image: Image.Image
@@ -107,6 +111,7 @@ class PageLayout:
     height: int = 0
     lines_detected: bool = False
     ordered: bool = False
+    alternates: list[Region] = field(default_factory=list)
 
     @property
     def text(self) -> str:

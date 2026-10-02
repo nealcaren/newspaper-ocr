@@ -105,6 +105,7 @@ class UnionDetector(Detector):
         else:
             regions = base.regions + holes
 
+        used = {id(r) for r in holes}
         return PageLayout(
             image=image,
             regions=regions,
@@ -113,6 +114,9 @@ class UnionDetector(Detector):
             # Only claim line detection if every region could have lines.
             lines_detected=base.lines_detected and cand.lines_detected,
             ordered=base.ordered,
+            # The secondary's other boxes: the pipeline reads these instead of a
+            # primary region that comes back empty (see Pipeline.rescue_empty_reads).
+            alternates=[r for r in cand.regions if id(r) not in used],
         )
 
     def find_holes(

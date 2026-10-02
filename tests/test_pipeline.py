@@ -303,3 +303,83 @@ def test_region_dedup_on_by_default_for_region_recognizers():
 def test_region_dedup_can_be_turned_off():
     img = Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
     assert len(_dedup_pipeline(region_dedup=False).analyze(img).regions) == 2
+
+
+# --- empty-read rescue -------------------------------------------------------
+
+
+class ClassifiedsDetector(Detector):
+    """One page-sized primary region (a classifieds page boxed as a 'table'),
+    plus a second detector's paragraph boxes inside it as alternates."""
+
+    def __init__(self, label="table"):
+        self.label = label
+
+    def detect(self, image):
+        w, h = image.size
+        big = Region(bbox=BBox(0, 0, w, h), image=image, label=self.label)
+        alts = [Region(bbox=BBox(10, 10 + 40 * k, w // 2, 40 + 40 * k), image=None,
+                       label="plain_text") for k in range(3)]
+        alts.append(Region(bbox=BBox(w // 2, 10, w - 10, 60), image=None, label="figure"))
+        return PageLayout(image=image, regions=[big], width=w, height=h,
+                          ordered=True, alternates=alts)
+
+
+class EmptyBigReadRecognizer(RegionRecognizer):
+    """Reads the page-sized region as empty and each small box as an ad."""
+
+    def recognize(self, region):
+        region.text = "" if region.bbox.x0 == 0 and region.bbox.y0 == 0 else \
+            f"FOR RENT: room near campus, ad {region.bbox.y0}"
+        return region
+
+
+def _rescue_pipeline(label="table", **kwargs):
+    return Pipeline(detector=ClassifiedsDetector(label), recognizer=EmptyBigReadRecognizer(),
+                    output=MockFormatter(), residual_ocr=False, layout_processing=False,
+                    **kwargs)
+
+
+def _page_img():
+    return Image.fromarray(np.full((200, 300, 3), 255, dtype=np.uint8))
+
+
+def test_empty_big_read_is_rescued_from_alternates():
+    regions = _rescue_pipeline().analyze(_page_img()).regions
+    assert [r.source for r in regions] == ["rescue"] * 3          # figure alternate skipped
+    assert all(r.text.startswith("FOR RENT") for r in regions)
+    assert [r.bbox.y0 for r in regions] == [10, 50, 90]            # reading order kept
+
+
+def test_headline_regions_are_not_rescued():
+    regions = _rescue_pipeline(label="title").analyze(_page_img()).regions
+    assert len(regions) == 1 and regions[0].label == "title"
+
+
+def test_rescue_can_be_turned_off():
+    regions = _rescue_pipeline(rescue_empty_reads=False).analyze(_page_img()).regions
+    assert len(regions) == 1 and regions[0].text == ""
+
+
+def test_rescue_keeps_region_when_alternates_read_less():
+    class AllEmpty(RegionRecognizer):
+        def recognize(self, region):
+            region.text = ""
+            return region
+    pipe = Pipeline(detector=ClassifiedsDetector(), recognizer=AllEmpty(), output=MockFormatter(),
+                    residual_ocr=False, layout_processing=False)
+    regions = pipe.analyze(_page_img()).regions
+    assert len(regions) == 1 and regions[0].label == "table"
+
+
+def test_empty_html_table_counts_as_empty():
+    class EmptyTable(EmptyBigReadRecognizer):
+        def recognize(self, region):
+            region = super().recognize(region)
+            if region.text == "":
+                region.text = "<table>" + "<tr><td></td><td></td></tr>" * 10 + "</table>"
+            return region
+    pipe = Pipeline(detector=ClassifiedsDetector(), recognizer=EmptyTable(), output=MockFormatter(),
+                    residual_ocr=False, layout_processing=False)
+    regions = pipe.analyze(_page_img()).regions
+    assert [r.source for r in regions] == ["rescue"] * 3
