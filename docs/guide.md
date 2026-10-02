@@ -114,6 +114,23 @@ like a banner, starts a section instead). Row-by-row orders are detected and
 handled. Otherwise holes join the page and the usual reading-order sort places
 them.
 
+**Pictures don't hide text.** The primary's picture regions (`image`,
+`image_block`) don't count as coverage for the secondary's text boxes, since the
+recognizer skips pictures; the secondary's own `figure` boxes still treat them as
+covered. On the *Daily Tar Heel*, MinerU once boxed a whole 1963 news page as one
+`image`; this recovered it (0 → 995 words).
+
+**Empty-read rescue.** The secondary's unused boxes ride along as
+`PageLayout.alternates`. After recognition, any region covering at least 5% of
+the page (not a headline, running head or picture) whose markup-free text is
+under 50 characters is re-read from the alternates inside it, and the swap is
+kept only if it yields more text. This catches a layout model that boxes a whole
+classifieds page as one `table` and reads it as empty (a 1993 *Daily Tar Heel*
+classifieds page: 0 → 3,315 words; the vendor's text layer has 3,436). On by
+default; `Pipeline(rescue_empty_reads=False)` turns it off. Rescued regions
+carry `source="rescue"`. Dense number tables (box scores, stock listings) are
+where rescued text is least reliable.
+
 ### Layout Processing
 
 Ported from the [Dangerous Press](https://dangerouspress.org) production pipeline. Applied automatically after detection:
