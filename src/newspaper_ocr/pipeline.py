@@ -46,6 +46,7 @@ class Pipeline:
         markup: str = "plain",
         region_dedup: bool | str = "auto",
         rescue_empty_reads: bool = True,
+        cjk_filter: bool = True,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -151,6 +152,10 @@ class Pipeline:
         # Re-read a large region that came back empty from the hole-fill
         # detector's boxes inside it (see _rescue_empty_reads).
         self.rescue_empty_reads = rescue_empty_reads
+
+        # Blank CJK text a VLM invented on a Latin-script page (see
+        # newspaper_ocr.script_filter).
+        self.cjk_filter = cjk_filter
 
         # Residual second-pass recovery (mask detected boxes -> re-OCR leftover
         # ink). "auto" (default) enables it for region-level recognizers, where
@@ -502,6 +507,10 @@ class Pipeline:
             from newspaper_ocr.markup import to_plain
             for region in layout.regions:
                 region.text = to_plain(region.text)
+
+        if self.cjk_filter:
+            from newspaper_ocr.script_filter import drop_cjk_hallucinations
+            layout = drop_cjk_hallucinations(layout)
 
         # After markup cleanup, so text containment compares clean text.
         if self.region_dedup is True or (

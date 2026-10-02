@@ -38,7 +38,10 @@ class Line:
 #   error           — recognition raised
 #   chunked_partial — a tall region was split into vertical chunks and at least
 #                     one chunk timed out, so the merged text is real but incomplete
-REGION_STATUSES = ("ok", "timeout", "repetition", "error", "chunked_partial")
+#   hallucination   — the read was in a script the page doesn't use (CJK on an
+#                     English page) and was blanked; see script_filter
+REGION_STATUSES = ("ok", "timeout", "repetition", "error", "chunked_partial",
+                   "hallucination")
 
 
 @dataclass

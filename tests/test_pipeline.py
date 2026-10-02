@@ -383,3 +383,38 @@ def test_empty_html_table_counts_as_empty():
                     residual_ocr=False, layout_processing=False)
     regions = pipe.analyze(_page_img()).regions
     assert [r.source for r in regions] == ["rescue"] * 3
+
+
+# --- CJK filter --------------------------------------------------------------
+
+
+class CjkTailRecognizer(RegionRecognizer):
+    """Reads the top half as English and the bottom half as invented Chinese."""
+
+    def recognize(self, region):
+        region.text = "信" if region.bbox.y0 else "The council met on Tuesday evening."
+        return region
+
+
+class TwoBoxDetector(Detector):
+    def detect(self, image):
+        w, h = image.size
+        regions = [Region(bbox=BBox(0, 0, w, h // 2), image=image, label="text"),
+                   Region(bbox=BBox(0, h // 2, w, h), image=image, label="text")]
+        return PageLayout(image=image, regions=regions, width=w, height=h)
+
+
+def _cjk_pipeline(**kwargs):
+    return Pipeline(detector=TwoBoxDetector(), recognizer=CjkTailRecognizer(),
+                    output=MockFormatter(), residual_ocr=False, layout_processing=False,
+                    **kwargs)
+
+
+def test_cjk_hallucination_is_blanked_by_default():
+    regions = _cjk_pipeline().analyze(_page_img()).regions
+    assert regions[1].text == "" and regions[1].status == "hallucination"
+
+
+def test_cjk_filter_can_be_turned_off():
+    regions = _cjk_pipeline(cjk_filter=False).analyze(_page_img()).regions
+    assert regions[1].text == "信"
