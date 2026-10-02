@@ -40,6 +40,11 @@ PIPELINE_REFERENCE_TAG = "2025-03-07-col-fix"
 # Labels treated as "text content" regions.
 _OCR_LABELS = {"text", "paragraph_title", "doc_title", "figure_title"}
 
+# Picture labels of an ordered (MinerU) layout.  Hole fill already lets text
+# boxes inside them through (see detectors.union), so they don't block the
+# low-confidence rescue either.
+_PICTURE_LABELS = frozenset({"image", "image_block"})
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -290,7 +295,8 @@ class LayoutProcessor:
         regions keep their original positions, then the empty-overlap drop.
         """
         kept = self._filter(layout.regions)
-        kept = self._rescue_low_confidence(kept, layout.regions)
+        kept = self._rescue_low_confidence(kept, layout.regions,
+                                           transparent=_PICTURE_LABELS)
         keep_ids = {id(r) for r in kept}
         regions = [r for r in layout.regions if id(r) in keep_ids]
         layout.regions = self._drop_empty_overlaps(regions, layout.lines_detected)
@@ -315,9 +321,11 @@ class LayoutProcessor:
         all_regions: list[Region],
         low_thresh: float = 0.15,
         max_overlap: float = 0.3,
+        transparent: frozenset[str] = frozenset(),
     ) -> list[Region]:
         """Add low-confidence regions (between low_thresh and 0.5) that don't
-        significantly overlap any already-accepted region.
+        significantly overlap any already-accepted region.  Accepted regions
+        labelled in *transparent* don't count as overlap.
         """
         candidates = [
             r
@@ -334,6 +342,7 @@ class LayoutProcessor:
                 continue
             total_overlap = sum(
                 _intersection_area(cand_bbox, _bbox_tuple(acc)) for acc in accepted
+                if acc.label not in transparent
             )
             if total_overlap / cand_area < max_overlap:
                 rescued.append(cand)

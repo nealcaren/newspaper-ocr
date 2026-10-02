@@ -174,3 +174,81 @@ def test_http_backend_without_server_is_actionable(recorded_clients):
 def test_unknown_backend_rejected(recorded_clients):
     with pytest.raises(ValueError, match="backend"):
         _mineru.get_client(backend="sglang")
+
+
+class SplitClient(FakeClient):
+    """Returns *picture_calls* layouts as given (one per call, in order), then
+    boxes every later tile as two stacked text blocks."""
+
+    def __init__(self, *picture_calls):
+        super().__init__()
+        self.picture_calls = [[SimpleNamespace(type=t, bbox=b) for t, b in blocks]
+                              for blocks in picture_calls]
+        self.sizes = []
+
+    def layout_detect(self, image):
+        self.sizes.append(image.size)
+        if len(self.sizes) <= len(self.picture_calls):
+            return self.picture_calls[len(self.sizes) - 1]
+        return [SimpleNamespace(type="text", bbox=[0.1, 0.0, 0.9, 0.5]),
+                SimpleNamespace(type="text", bbox=[0.1, 0.5, 0.9, 1.0])]
+
+
+PAGE_PICTURE = [("image", [0.0, 0.0, 1.0, 1.0])]
+
+
+def test_page_sized_picture_is_retried_in_halves(fake):
+    from newspaper_ocr.detectors.mineru import MineruDetector
+
+    client = fake(SplitClient(PAGE_PICTURE))
+    det = MineruDetector()
+    layout = det.detect(Image.new("RGB", (200, 100), "white"))
+    assert det.last_tiles == 2 and client.sizes == [(200, 100), (110, 100), (110, 100)]
+    # Left half first, then right; boxes in page coordinates.
+    assert [r.bbox.to_tuple() for r in layout.regions] == [
+        (11, 0, 99, 50), (11, 50, 99, 100), (101, 0, 189, 50), (101, 50, 189, 100)]
+
+
+def test_a_half_that_misfires_again_is_split_top_and_bottom(fake):
+    from newspaper_ocr.detectors.mineru import MineruDetector
+
+    client = fake(SplitClient(PAGE_PICTURE, PAGE_PICTURE))  # page, then left half
+    det = MineruDetector()
+    layout = det.detect(Image.new("RGB", (200, 100), "white"))
+    assert det.last_tiles == 3
+    assert client.sizes == [(200, 100), (110, 100), (110, 55), (110, 55), (110, 100)]
+    # Left half top-to-bottom, then the right half.  The left half's middle
+    # block straddled the cut and was boxed in both pieces: it becomes one box.
+    assert [r.bbox.to_tuple() for r in layout.regions] == [
+        (11, 0, 99, 28), (11, 28, 99, 73), (11, 73, 99, 100),
+        (101, 0, 189, 50), (101, 50, 189, 100)]
+    assert layout.regions[1].image.size == (88, 45)
+
+
+def test_ordinary_page_is_not_retried(fake):
+    from newspaper_ocr.detectors.mineru import MineruDetector
+
+    client = fake(SplitClient([("image", [0.0, 0.0, 0.5, 0.5]),
+                               ("text", [0.5, 0.0, 1.0, 1.0])]))
+    det = MineruDetector()
+    det.detect(Image.new("RGB", (200, 100), "white"))
+    assert det.last_tiles == 1 and len(client.sizes) == 1
+
+
+def test_split_kept_only_if_it_covers_more_text(fake):
+    from newspaper_ocr.detectors.mineru import MineruDetector
+
+    blocks = [("text", [0.0, 0.0, 1.0, 1.0])] * MineruDetector.SPLIT_MIN_BLOCKS
+    client = fake(SplitClient(blocks))
+    det = MineruDetector()
+    layout = det.detect(Image.new("RGB", (200, 100), "white"))
+    assert len(client.sizes) == 3 and det.last_tiles == 1
+    assert len(layout.regions) == MineruDetector.SPLIT_MIN_BLOCKS
+
+
+def test_split_retry_can_be_turned_off(fake):
+    from newspaper_ocr.detectors.mineru import MineruDetector
+
+    client = fake(SplitClient(PAGE_PICTURE))
+    MineruDetector(split_retry=False).detect(Image.new("RGB", (200, 100), "white"))
+    assert len(client.sizes) == 1

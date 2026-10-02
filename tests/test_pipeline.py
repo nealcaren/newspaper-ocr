@@ -383,3 +383,107 @@ def test_empty_html_table_counts_as_empty():
                     residual_ocr=False, layout_processing=False)
     regions = pipe.analyze(_page_img()).regions
     assert [r.source for r in regions] == ["rescue"] * 3
+
+
+# --- CJK filter --------------------------------------------------------------
+
+
+class CjkTailRecognizer(RegionRecognizer):
+    """Reads the top half as English and the bottom half as invented Chinese."""
+
+    def recognize(self, region):
+        region.text = "信" if region.bbox.y0 else "The council met on Tuesday evening."
+        return region
+
+
+class TwoBoxDetector(Detector):
+    def detect(self, image):
+        w, h = image.size
+        regions = [Region(bbox=BBox(0, 0, w, h // 2), image=image, label="text"),
+                   Region(bbox=BBox(0, h // 2, w, h), image=image, label="text")]
+        return PageLayout(image=image, regions=regions, width=w, height=h)
+
+
+def _cjk_pipeline(**kwargs):
+    return Pipeline(detector=TwoBoxDetector(), recognizer=CjkTailRecognizer(),
+                    output=MockFormatter(), residual_ocr=False, layout_processing=False,
+                    **kwargs)
+
+
+def test_cjk_hallucination_is_blanked_by_default():
+    regions = _cjk_pipeline().analyze(_page_img()).regions
+    assert regions[1].text == "" and regions[1].status == "hallucination"
+
+
+def test_cjk_filter_can_be_turned_off():
+    regions = _cjk_pipeline(cjk_filter=False).analyze(_page_img()).regions
+    assert regions[1].text == "信"
+
+
+# --- reading pictures --------------------------------------------------------
+
+
+class PictureDetector(Detector):
+    """A page-wide picture with an already-boxed text block inside it."""
+
+    def detect(self, image):
+        w, h = image.size
+        pic = Region(bbox=BBox(0, 0, w, h), image=image, label="image")
+        inner = Region(bbox=BBox(10, 10, 60, 40), image=image.crop((10, 10, 60, 40)),
+                       label="text")
+        return PageLayout(image=image, regions=[pic, inner], width=w, height=h, ordered=True)
+
+
+class PictureReader(RegionRecognizer):
+    """Skips pictures like MinerU; reads any 'text' crop as *answer*."""
+
+    picture_reads = True
+
+    def __init__(self, answer="KEMP'S BALSAM THE BEST COUGH CURE"):
+        self.answer = answer
+        self.crops = []
+
+    def recognize(self, region):
+        if region.label == "image":
+            region.text = ""
+        elif region.bbox.x0 == 0:          # the picture, re-read as text
+            self.crops.append(region.image)
+            region.text = self.answer
+        else:
+            region.text = "Already read."
+        return region
+
+
+def _picture_pipeline(rec, **kwargs):
+    return Pipeline(detector=PictureDetector(), recognizer=rec, output=MockFormatter(),
+                    residual_ocr=False, layout_processing=False, **kwargs)
+
+
+def _ink_page():
+    return Image.fromarray(np.zeros((100, 200, 3), dtype=np.uint8))
+
+
+def test_picture_text_is_read_and_label_kept():
+    rec = PictureReader()
+    regions = _picture_pipeline(rec).analyze(_ink_page()).regions
+    assert regions[0].label == "image"
+    assert regions[0].text == "KEMP'S BALSAM THE BEST COUGH CURE"
+    # The text box inside the picture was whited out before the re-read.
+    crop = np.asarray(rec.crops[0])
+    assert crop[20:30, 20:50].min() == 255 and crop[60:90, 100:190].max() == 0
+
+
+def test_picture_reads_need_three_words_and_no_latex():
+    for answer in ("B-A-T", r"\( \frac{1 + u}{7} = 70\% \)"):
+        regions = _picture_pipeline(PictureReader(answer)).analyze(_ink_page()).regions
+        assert regions[0].text == ""
+
+
+def test_read_pictures_follows_the_recognizer_unless_forced():
+    class Plain(PictureReader):
+        picture_reads = False
+    assert _picture_pipeline(Plain()).analyze(_ink_page()).regions[0].text == ""
+    forced = _picture_pipeline(Plain(), read_pictures=True).analyze(_ink_page())
+    assert forced.regions[0].text.startswith("KEMP'S")
+    off = _picture_pipeline(PictureReader(), read_pictures=False).analyze(_ink_page())
+    assert off.regions[0].text == ""

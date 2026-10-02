@@ -314,9 +314,20 @@ def test_text_inside_a_primary_picture_becomes_a_hole():
 
 def test_picture_candidate_inside_a_primary_picture_is_not_a_hole():
     img = _page([(20, 20, 280, 380)])
-    primary = [_r(0, 0, 600, 400, "PHOTO", label="image")]
+    primary = [_r(0, 0, 300, 400, "PHOTO", label="image")]  # half the page
     cands = [_r(20, 20, 280, 380, "FIG", label="figure")]
     assert UnionDetector(None, None).find_holes(img, primary, cands) == []
+
+
+def test_page_sized_picture_lets_figure_candidates_through():
+    # A "picture" over most of the page is a misread page: DocLayout's figure
+    # boxes under it (ads, often full of text) become holes too.
+    img = _page([(20, 20, 280, 380)])
+    primary = [_r(0, 0, 600, 400, "PAGE", label="image")]
+    cands = [_r(20, 20, 280, 380, "AD", label="figure")]
+    assert _names(UnionDetector(None, None).find_holes(img, primary, cands)) == ["AD"]
+    strict = UnionDetector(None, None, max_picture_frac=1.0)
+    assert strict.find_holes(img, primary, cands) == []
 
 
 def test_transparency_can_be_turned_off():

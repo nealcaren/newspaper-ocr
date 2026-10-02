@@ -30,6 +30,7 @@ _STATUS_COLORS = {
     "timeout": "#d04a2f",
     "repetition": "#c98a00",
     "error": "#b3179b",
+    "hallucination": "#7a7a7a",
 }
 
 _TEMPLATE = """<!doctype html>
