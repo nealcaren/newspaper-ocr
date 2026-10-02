@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from pathlib import Path
 from typing import Callable
 from PIL import Image
@@ -47,6 +48,7 @@ class Pipeline:
         region_dedup: bool | str = "auto",
         rescue_empty_reads: bool = True,
         cjk_filter: bool = True,
+        read_pictures: bool | str = "auto",
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -156,6 +158,12 @@ class Pipeline:
         # Blank CJK text a VLM invented on a Latin-script page (see
         # newspaper_ocr.script_filter).
         self.cjk_filter = cjk_filter
+
+        # Read the text in picture regions (see _read_pictures).  "auto" runs
+        # it for recognizers that flag themselves safe for it (MinerU).
+        if read_pictures == "auto":
+            read_pictures = getattr(self.recognizer, "picture_reads", False)
+        self.read_pictures = bool(read_pictures)
 
         # Residual second-pass recovery (mask detected boxes -> re-OCR leftover
         # ink). "auto" (default) enables it for region-level recognizers, where
@@ -319,6 +327,53 @@ class Pipeline:
             layout.regions = keep + rescued
         return layout
 
+    #: Labels of the picture regions _read_pictures reads.
+    PICTURE_LABELS = frozenset({"image", "image_block"})
+    #: A picture read needs this many words (2+ letters) to be kept.
+    PICTURE_MIN_WORDS = 3
+    _MATH = re.compile(r"\\\(|\\\[|\\frac|\$\$")
+    _WORD = re.compile(r"[A-Za-z]{2,}")
+
+    def _read_pictures(self, layout: PageLayout) -> PageLayout:
+        """Read the text in picture regions the recognizer skipped.
+
+        Layout models file illustrated ads under ``image``, and the recognizer
+        skips pictures, so their copy is lost: on 200 pages of 1900-1932 Black
+        newspapers, MinerU's ``image`` regions held about 8,000 words that
+        PaddleX + GLM-OCR read (issue #30).  Each empty picture region is read
+        as text, with any other region's box inside it whited out so text
+        already read isn't read twice.  A read is kept only if it is a clean
+        read of at least ``PICTURE_MIN_WORDS`` words and has no LaTeX: a text
+        read of a photo comes back empty, as a stray letter or two, or as an
+        invented equation.  The region keeps its picture label.
+        """
+        from PIL import ImageDraw
+
+        pics = [r for r in layout.regions
+                if r.label in self.PICTURE_LABELS and not (r.text or "").strip()]
+        if not pics:
+            return layout
+        crops = []
+        for pic in pics:
+            b = pic.bbox
+            crop = layout.image.crop(b.to_tuple())
+            draw = ImageDraw.Draw(crop)
+            for r in layout.regions:
+                o = r.bbox
+                if r is pic or r.label in self.PICTURE_LABELS:
+                    continue
+                if min(b.x1, o.x1) > max(b.x0, o.x0) and min(b.y1, o.y1) > max(b.y0, o.y0):
+                    draw.rectangle((o.x0 - b.x0, o.y0 - b.y0, o.x1 - b.x0, o.y1 - b.y0),
+                                   fill="white")
+            crops.append(Region(bbox=b, image=crop, label="text"))
+        reads = self._read_regions(layout.image, crops)
+        for pic, read in zip(pics, reads):
+            text = read.text or ""
+            if (read.status == "ok" and not self._MATH.search(text)
+                    and len(self._WORD.findall(text)) >= self.PICTURE_MIN_WORDS):
+                pic.text = text
+        return layout
+
     def _read_regions(self, page_image, regions: list[Region]) -> list[Region]:
         """Read *regions* with whatever region-level entry point the recognizer has."""
         batch = getattr(self.recognizer, "recognize_regions", None)
@@ -475,6 +530,9 @@ class Pipeline:
 
         if self.rescue_empty_reads and layout.alternates:
             layout = self._rescue_empty_reads(layout)
+
+        if self.read_pictures:
+            layout = self._read_pictures(layout)
 
         # Fallback: re-recognize low-confidence lines with the fallback recognizer.
         # Only applies when the primary recognizer is a LineRecognizer (so we have

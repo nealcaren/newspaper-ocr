@@ -145,6 +145,16 @@ default; `Pipeline(rescue_empty_reads=False)` turns it off. Rescued regions
 carry `source="rescue"`. Dense number tables (box scores, stock listings) are
 where rescued text is least reliable.
 
+**Text in pictures.** Illustrated ads are often boxed as `image`, and the
+recognizer skips pictures, so their copy is lost. After recognition each empty
+picture region is read as text, with any other region's box inside it whited
+out, and the read is kept if it is clean, at least three words long, and free of
+LaTeX (a text read of a photo comes back empty, as a letter or two, or as an
+invented equation). The region keeps its picture label. `read_pictures="auto"`
+(default) does this for the MinerU recognizers; `True` forces it for any
+region recognizer, but GLM-OCR tends to *describe* photos ("The image contains
+five photographs…"), which the gate doesn't catch. `False` turns it off.
+
 **CJK hallucinations.** Given a tiny crop, MinerU often answers in Chinese.
 On a page whose Latin letters outnumber its CJK characters, a region that is at
 least 30% CJK is blanked (status `hallucination`, original text in

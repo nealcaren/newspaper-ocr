@@ -30,6 +30,9 @@ class MineruRecognizer(RegionRecognizer):
     """
 
     mode = "region"
+    #: A text read of a photo comes back empty or as noise, not as a caption
+    #: describing it, so ``Pipeline(read_pictures="auto")`` reads pictures.
+    picture_reads = True
     #: MinerU backend (see :data:`newspaper_ocr._mineru.BACKENDS`).
     backend = "transformers"
 
