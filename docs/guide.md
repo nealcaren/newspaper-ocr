@@ -118,7 +118,21 @@ them.
 `image_block`) don't count as coverage for the secondary's text boxes, since the
 recognizer skips pictures; the secondary's own `figure` boxes still treat them as
 covered. On the *Daily Tar Heel*, MinerU once boxed a whole 1963 news page as one
-`image`; this recovered it (0 → 995 words).
+`image`; this recovered it (0 → 995 words). A primary picture covering more
+than half the page (`max_picture_frac=0.5`) is a misread page, not a photo, so
+it doesn't cover the secondary's `figure` boxes either, and low-confidence holes
+inside a picture survive layout post-processing.
+
+**MinerU tile retry.** MinerU writes its layout as text, and its 16,384-token
+context fits about 680 boxes: dense small type boxed line by line stops partway
+down the page. It also sometimes boxes a page, or part of one, as a single
+`image`. When a layout has 500 or more boxes, or a picture covering more than
+half of it, the MinerU detector lays out the left and right halves separately,
+and keeps cutting any piece that still looks broken (alternating vertical and
+horizontal cuts, down to eighths of the page). A split is kept only if its text
+boxes cover more of the piece. On 200 pages of 1900–1932 Black newspapers this
+took a 1914 *New York Age* page from 396 to 5,751 words and a 1905 one from
+2,326 to 4,825 (issue #30). `MineruDetector(split_retry=False)` turns it off.
 
 **Empty-read rescue.** The secondary's unused boxes ride along as
 `PageLayout.alternates`. After recognition, any region covering at least 5% of
@@ -130,6 +144,13 @@ classifieds page: 0 → 3,315 words; the vendor's text layer has 3,436). On by
 default; `Pipeline(rescue_empty_reads=False)` turns it off. Rescued regions
 carry `source="rescue"`. Dense number tables (box scores, stock listings) are
 where rescued text is least reliable.
+
+**CJK hallucinations.** Given a tiny crop, MinerU often answers in Chinese.
+On a page whose Latin letters outnumber its CJK characters, a region that is at
+least 30% CJK is blanked (status `hallucination`, original text in
+`text_primary`) and stray CJK characters elsewhere are removed. A real CJK page
+is left alone. On by default for every recognizer; `Pipeline(cjk_filter=False)`
+turns it off.
 
 ### Layout Processing
 
@@ -608,7 +629,7 @@ article segmentation, LLM enrichment). Each region carries:
 | `label` | Region class from the detector (`text`, `title`, ...) |
 | `bbox` | `x0`, `y0`, `x1`, `y1` in page pixels |
 | `text` | Recognized text |
-| `status` | `ok`, `timeout`, `repetition`, `error`, or `chunked_partial` |
+| `status` | `ok`, `timeout`, `repetition`, `error`, `chunked_partial`, or `hallucination` |
 | `confidence` | Detection confidence |
 | `source` | `primary` or `hole` when detectors are combined (omitted otherwise) |
 | `lines` | Per-line `text` / `confidence` / `bbox`, when the recognizer is line-level |
@@ -618,7 +639,8 @@ images: `timeout` means the recognizer hit its wall-clock budget (the text is
 the placeholder `[OCR timeout]`), `repetition` means the model looped and the
 text was truncated, `error` means recognition raised, and `chunked_partial`
 means a tall region was split into bands and at least one band still failed, so
-the merged text is real but incomplete.
+the merged text is real but incomplete. `hallucination` means the read was in a
+script the page doesn't use (CJK on an English page) and was blanked.
 
 ## Review Site
 
