@@ -129,6 +129,16 @@ def test_rescue_skips_heavily_overlapping():
     assert len(result) == 1  # low_conf not added
 
 
+def test_ordered_rescue_sees_through_pictures():
+    # A low-confidence hole inside MinerU's page-sized "image" (issue #30).
+    page = _region(0, 0, 600, 400, confidence=1.0)
+    page.label = "image"
+    hole = _region(20, 20, 280, 380, confidence=0.3)
+    layout = PageLayout(image=Image.new("RGB", (600, 400)), regions=[page, hole],
+                        width=600, height=400, ordered=True)
+    assert LayoutProcessor().process(layout).regions == [page, hole]
+
+
 def test_rescue_ignores_too_small_candidates():
     lp = LayoutProcessor(confidence_thresh=0.5)
     accepted: list[Region] = []

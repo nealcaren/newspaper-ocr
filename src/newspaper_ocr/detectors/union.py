@@ -18,6 +18,13 @@ news page as one ``image`` and the page came back empty.  Candidates that are
 themselves pictures (``picture_labels``, DocLayout's ``figure``) still treat
 those regions as covered, so photos aren't re-added and read as text.
 
+A primary picture covering more than ``max_picture_frac`` of the page is not
+believed at all: no newspaper page is one photo, so it covers nothing, and the
+secondary's boxes under it, ``figure`` boxes included, can all become holes.
+Otherwise a page MinerU boxed as one ``image`` keeps only the secondary's text
+boxes, and on a 1914 *New York Age* page that was 4 holes and 375 of ~5,900
+words (issue #30).
+
 On NewsBench, MinerU2.5 boxes plus DocLayout-YOLO holes beat either detector
 alone: MinerU's order is excellent but it misses isolated blocks (a poem stanza,
 an ad, a side column) that DocLayout covers.  Most pages get few or no holes and
@@ -58,6 +65,9 @@ class UnionDetector(Detector):
     picture_labels : iterable of str
         Secondary labels that are pictures themselves; they are checked
         against all primary regions, transparent ones included.
+    max_picture_frac : float
+        A transparent primary region larger than this fraction of the page
+        covers nothing, not even for picture candidates.
 
     The returned layout tags each region's ``source`` as ``"primary"`` or
     ``"hole"``.  If the primary layout is ``ordered``, holes are inserted into
@@ -76,6 +86,7 @@ class UnionDetector(Detector):
         exclude_labels: Iterable[str] = (),
         transparent_labels: Iterable[str] = ("image", "image_block"),
         picture_labels: Iterable[str] = ("figure",),
+        max_picture_frac: float = 0.5,
     ):
         self.primary = primary
         self.secondary = secondary
@@ -85,6 +96,7 @@ class UnionDetector(Detector):
         self.exclude_labels = frozenset(exclude_labels)
         self.transparent_labels = frozenset(transparent_labels)
         self.picture_labels = frozenset(picture_labels)
+        self.max_picture_frac = max_picture_frac
         #: Number of holes added on the most recent page, for diagnostics.
         self.last_n_holes = 0
 
@@ -134,9 +146,11 @@ class UnionDetector(Detector):
         covered_all = np.zeros((h, w), dtype=bool)
         for r in primary:
             sl = self._slice(r, w, h)
-            covered_all[sl] = True
             if r.label not in self.transparent_labels:
                 covered[sl] = True
+            elif covered_all[sl].size > self.max_picture_frac * h * w:
+                continue  # a "picture" this big is a misread page
+            covered_all[sl] = True
 
         holes: list[Region] = []
         for r in sorted(candidates, key=lambda r: -r.confidence):
