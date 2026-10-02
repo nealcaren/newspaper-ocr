@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Callable
 from PIL import Image
 from newspaper_ocr import chunking
-from newspaper_ocr.models import Region, PageLayout
+from newspaper_ocr.models import BBox, Region, PageLayout
 from newspaper_ocr.detectors.base import Detector
 from newspaper_ocr.recognizers.base import LineRecognizer, RegionRecognizer
 from newspaper_ocr.formatters.base import Formatter
@@ -13,6 +13,14 @@ from newspaper_ocr.formatters.base import Formatter
 #:   partial  — real but degraded text, so only a clean fallback read replaces it
 _FALLBACK_NO_LOSS = {"timeout", "error"}
 _FALLBACK_PARTIAL = {"repetition", "chunked_partial"}
+
+
+def _inside(a: BBox, b: BBox) -> float:
+    """Fraction of box *a* that lies inside box *b*."""
+    ix = max(0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    iy = max(0, min(a.y1, b.y1) - max(a.y0, b.y0))
+    area = max(0, a.x1 - a.x0) * max(0, a.y1 - a.y0)
+    return ix * iy / area if area else 0.0
 
 
 class Pipeline:
@@ -37,6 +45,7 @@ class Pipeline:
         hole_fill_detector: Detector | str | None = None,
         markup: str = "plain",
         region_dedup: bool | str = "auto",
+        rescue_empty_reads: bool = True,
     ):
         from newspaper_ocr.detectors import DETECTORS
         from newspaper_ocr.recognizers import RECOGNIZERS
@@ -139,6 +148,10 @@ class Pipeline:
         # region-level recognizers, whose overlapping boxes are each read whole.
         self.region_dedup = region_dedup
 
+        # Re-read a large region that came back empty from the hole-fill
+        # detector's boxes inside it (see _rescue_empty_reads).
+        self.rescue_empty_reads = rescue_empty_reads
+
         # Residual second-pass recovery (mask detected boxes -> re-OCR leftover
         # ink). "auto" (default) enables it for region-level recognizers, where
         # it's validated and do-no-harm-gated; it stays off for line recognizers
@@ -238,6 +251,77 @@ class Pipeline:
             line.text = result.text
             line.confidence = 1.0  # VLM fallback is trusted
             return line
+
+    #: Labels never rescued: headlines and running heads are legitimately
+    #: short, and pictures/containers are skipped by the recognizer anyway.
+    RESCUE_SKIP = frozenset({"title", "header", "footer", "page_number", "abandon",
+                             "image", "image_block", "figure", "chart", "list",
+                             "equation_block"})
+    #: Alternate labels never used as rescue boxes.
+    RESCUE_EXCLUDE = frozenset({"figure", "image", "abandon"})
+    RESCUE_MIN_AREA = 0.05   # fraction of the page
+    RESCUE_MAX_CHARS = 50    # a read this short from a region this big is "empty"
+    RESCUE_INSIDE = 0.8      # fraction of an alternate box that must lie inside
+
+    def _rescue_empty_reads(self, layout: PageLayout) -> PageLayout:
+        """Re-read large empty regions from the hole-fill detector's boxes.
+
+        A layout model can box a whole classifieds page as one ``table`` and then
+        return nothing for it — the read is ``ok`` but empty, and the second
+        detector's paragraph boxes inside it were never used because the big box
+        "covered" them.  For each region of at least ``RESCUE_MIN_AREA`` of the
+        page (not a headline, running head or picture) whose text is under
+        ``RESCUE_MAX_CHARS``, read the alternates lying inside it instead.  The
+        swap happens only if they produce more text, so it can't lose anything.
+        """
+        page_area = max(1, layout.width * layout.height)
+        alternates = [a for a in layout.alternates if a.label not in self.RESCUE_EXCLUDE]
+        keep, rescued = [], []
+        for region in layout.regions:
+            b = region.bbox
+            area = max(0, b.x1 - b.x0) * max(0, b.y1 - b.y0)
+            text = (region.text or "").strip()
+            if (region.label in self.RESCUE_SKIP or area < self.RESCUE_MIN_AREA * page_area
+                    or len(text) >= self.RESCUE_MAX_CHARS):
+                keep.append(region)
+                continue
+            inside = [a for a in alternates if _inside(a.bbox, b) >= self.RESCUE_INSIDE]
+            if not inside:
+                keep.append(region)
+                continue
+            for a in inside:
+                if a.image is None:
+                    a.image = layout.image.crop(a.bbox.to_tuple())
+            reads = self._read_regions(layout.image, inside)
+            reads = [r for r in reads if (r.text or "").strip()]
+            if sum(len(r.text.strip()) for r in reads) <= len(text):
+                keep.append(region)
+                continue
+            for r in reads:
+                r.source = "rescue"
+            alternates = [a for a in alternates if all(a is not r for r in inside)]
+            rescued.extend(reads)
+        if not rescued:
+            return layout
+        if layout.ordered:
+            from newspaper_ocr.layout_processor import insert_in_order
+            layout.regions = insert_in_order(keep, rescued)
+        else:
+            layout.regions = keep + rescued
+        return layout
+
+    def _read_regions(self, page_image, regions: list[Region]) -> list[Region]:
+        """Read *regions* with whatever region-level entry point the recognizer has."""
+        batch = getattr(self.recognizer, "recognize_regions", None)
+        if batch is not None:
+            return batch(page_image, regions)
+        if hasattr(self.recognizer, "recognize_region"):
+            for r in regions:
+                self.recognizer.recognize_region(r)
+            return regions
+        if isinstance(self.recognizer, RegionRecognizer):
+            return [self.recognizer.recognize(r) for r in regions]
+        return []  # a line-only recognizer can't read a bare region
 
     def _chunk_region(self, region: Region) -> Region:
         """Re-OCR a tall region by splitting it into vertical bands.
@@ -379,6 +463,9 @@ class Pipeline:
                 if isinstance(self.fallback, RegionRecognizer):
                     region = self._apply_region_fallback(region)
                 layout.regions[i] = region
+
+        if self.rescue_empty_reads and layout.alternates:
+            layout = self._rescue_empty_reads(layout)
 
         # Fallback: re-recognize low-confidence lines with the fallback recognizer.
         # Only applies when the primary recognizer is a LineRecognizer (so we have
