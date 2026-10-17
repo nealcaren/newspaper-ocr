@@ -39,7 +39,8 @@ class Line:
 #   chunked_partial — a tall region was split into vertical chunks and at least
 #                     one chunk timed out, so the merged text is real but incomplete
 #   hallucination   — the read was in a script the page doesn't use (CJK on an
-#                     English page) and was blanked; see script_filter
+#                     English page), or was a refusal ("no legible text in this
+#                     image"), and was blanked; see script_filter, refusal_filter
 REGION_STATUSES = ("ok", "timeout", "repetition", "error", "chunked_partial",
                    "hallucination")
 

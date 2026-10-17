@@ -162,6 +162,17 @@ least 30% CJK is blanked (status `hallucination`, original text in
 is left alone. On by default for every recognizer; `Pipeline(cjk_filter=False)`
 turns it off.
 
+**Refusals.** Given a tiny, blank or blurry crop, chat-tuned VLMs answer about
+the image instead of reading it: "There is no legible text in this image", "I'm
+sorry, but I can't read the text in this image", "The image has been rotated 90
+degrees clockwise". On NewsBench, gemini-3.5-flash-lite wrote 162 words of this
+and deepseek-v4.1-flash 355. A sentence is cut when it names the image ("this
+image", but not "the image of God") together with a word about seeing or
+reading it (text, legible, blurry, rotated, transcribe ...), or uses a fixed
+refusal phrase ("no legible text", "unable to transcribe"). A region with
+nothing else in it is blanked (status `hallucination`, original text in
+`text_primary`). On by default; `Pipeline(refusal_filter=False)` turns it off.
+
 ### Layout Processing
 
 Ported from the [Dangerous Press](https://dangerouspress.org) production pipeline. Applied automatically after detection:
@@ -650,7 +661,8 @@ the placeholder `[OCR timeout]`), `repetition` means the model looped and the
 text was truncated, `error` means recognition raised, and `chunked_partial`
 means a tall region was split into bands and at least one band still failed, so
 the merged text is real but incomplete. `hallucination` means the read was in a
-script the page doesn't use (CJK on an English page) and was blanked.
+script the page doesn't use (CJK on an English page), or was a refusal ("There
+is no legible text in this image"), and was blanked.
 
 ## Review Site
 

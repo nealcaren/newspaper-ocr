@@ -48,6 +48,7 @@ class Pipeline:
         region_dedup: bool | str = "auto",
         rescue_empty_reads: bool = True,
         cjk_filter: bool = True,
+        refusal_filter: bool = True,
         read_pictures: bool | str = "auto",
     ):
         from newspaper_ocr.detectors import DETECTORS
@@ -158,6 +159,10 @@ class Pipeline:
         # Blank CJK text a VLM invented on a Latin-script page (see
         # newspaper_ocr.script_filter).
         self.cjk_filter = cjk_filter
+
+        # Cut "There is no legible text in this image" and other refusals a
+        # VLM writes instead of a reading (see newspaper_ocr.refusal_filter).
+        self.refusal_filter = refusal_filter
 
         # Read the text in picture regions (see _read_pictures).  "auto" runs
         # it for recognizers that flag themselves safe for it (MinerU).
@@ -569,6 +574,10 @@ class Pipeline:
         if self.cjk_filter:
             from newspaper_ocr.script_filter import drop_cjk_hallucinations
             layout = drop_cjk_hallucinations(layout)
+
+        if self.refusal_filter:
+            from newspaper_ocr.refusal_filter import drop_refusals
+            layout = drop_refusals(layout)
 
         # After markup cleanup, so text containment compares clean text.
         if self.region_dedup is True or (
