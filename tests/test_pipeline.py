@@ -420,6 +420,35 @@ def test_cjk_filter_can_be_turned_off():
     assert regions[1].text == "信"
 
 
+# --- refusal filter ----------------------------------------------------------
+
+
+class RefusalTailRecognizer(RegionRecognizer):
+    """Reads the top half as English and refuses on the bottom half."""
+
+    def recognize(self, region):
+        region.text = ("There is no legible text in this image." if region.bbox.y0
+                       else "The council met on Tuesday evening.")
+        return region
+
+
+def _refusal_pipeline(**kwargs):
+    return Pipeline(detector=TwoBoxDetector(), recognizer=RefusalTailRecognizer(),
+                    output=MockFormatter(), residual_ocr=False, layout_processing=False,
+                    **kwargs)
+
+
+def test_refusal_is_blanked_by_default():
+    regions = _refusal_pipeline().analyze(_page_img()).regions
+    assert regions[1].text == "" and regions[1].status == "hallucination"
+    assert regions[0].text == "The council met on Tuesday evening."
+
+
+def test_refusal_filter_can_be_turned_off():
+    regions = _refusal_pipeline(refusal_filter=False).analyze(_page_img()).regions
+    assert regions[1].text == "There is no legible text in this image."
+
+
 # --- reading pictures --------------------------------------------------------
 
 
